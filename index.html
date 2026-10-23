@@ -59,36 +59,41 @@
 <body oncontextmenu="return false;" oncopy="return false;" oncut="return false;">
   <div id="root"></div>
 
-  <!-- Firebase SDK Imports -->
+  <!-- Safe Firebase SDK Init Loader -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     window.firebaseAppInit = async function() {
       try {
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'john-fitness-owner-app-v4';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+        const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'john-fitness-owner-app-v4';
+        let firebaseConfig = {
           apiKey: "AIzaSyDummyKeyForLocalDevFallback12345",
           authDomain: "john-fitness.firebaseapp.com",
           projectId: "john-fitness"
         };
+        
+        if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+          try {
+            firebaseConfig = JSON.parse(__firebase_config);
+          } catch(e) {}
+        }
 
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        // AUTH BEFORE QUERIES
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token);
         } else {
           await signInAnonymously(auth);
         }
 
-        window.FB = { db, auth, appId, collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, getDocs };
+        window.FB = { db, auth, appId, collection, doc, setDoc, deleteDoc, onSnapshot, query };
         window.dispatchEvent(new Event('firebase-ready'));
       } catch (e) {
-        console.error("Firebase init error (Running fallback offline mode):", e);
+        console.warn("Running in offline localStorage fallback mode:", e);
         window.dispatchEvent(new Event('firebase-ready'));
       }
     };
@@ -344,7 +349,7 @@
       useEffect(() => {
         const initCloudSync = () => {
           if (window.FB && window.FB.db) {
-            const { db, appId, collection, onSnapshot, query, getDocs, doc, setDoc } = window.FB;
+            const { db, appId, collection, onSnapshot, query, doc, setDoc } = window.FB;
             
             // 1. Members Realtime Sync
             const membersRef = collection(db, 'artifacts', appId, 'public', 'data', 'members_list');
@@ -357,14 +362,12 @@
                 setMembers(cloudMembers);
                 setIsCloudSynced(true);
               } else {
-                // If cloud is empty, check localStorage migration or fallback
                 const localSaved = localStorage.getItem(LOCAL_STORAGE_KEY);
                 if (localSaved) {
                   try {
                     const parsedLocal = JSON.parse(localSaved);
                     if (parsedLocal.length > 0) {
                       setMembers(parsedLocal);
-                      // Migrate to cloud
                       parsedLocal.forEach(m => {
                         setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(m.id)), m);
                       });
@@ -415,7 +418,6 @@
         setTimeout(() => setToast(null), 3500);
       };
 
-      // --- SAVE / UPDATE MEMBER TO CLOUD & LOCAL ---
       const saveMemberToCloudAndLocal = async (updatedMembersList, targetMember) => {
         setMembers(updatedMembersList);
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedMembersList));
@@ -432,7 +434,6 @@
         }
       };
 
-      // --- DELETE MEMBER & SAVE TO ARCHIVE ---
       const executeDeleteMember = async (archiveObj, originalId) => {
         const updated = members.filter(m => m.id !== originalId);
         setMembers(updated);
@@ -444,9 +445,7 @@
         if (window.FB && window.FB.db) {
           try {
             const { db, appId, doc, setDoc, deleteDoc } = window.FB;
-            // Delete from active members collection
             await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(originalId)));
-            // Save to archive collection
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deleted_archive', String(archiveObj.archiveId)), archiveObj);
           } catch (e) {
             console.error("Archive sync failed:", e);
@@ -532,7 +531,6 @@
         reader.readAsText(file);
       };
 
-      {/* --- LOGIN SCREEN (Without Subtitle Text as requested) --- */}
       if (!isLoggedIn) {
         return (
           <div className="min-h-screen bg-[#050505] flex flex-col justify-between p-4 relative overflow-hidden">
@@ -614,7 +612,6 @@
         );
       }
 
-      // --- CALCULATE DASHBOARD METRICS ---
       let totalRevenue = 0, totalPending = 0, cashTotal = 0, onlineTotal = 0;
       let activeCount = 0, expiringSoonCount = 0, expiredCount = 0;
 
@@ -636,7 +633,6 @@
         }
       });
 
-      // Filter Members List
       const filteredMembers = members.filter(m => {
         const matchesSearch = (m.name && m.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
                               (m.phone && m.phone.includes(searchTerm));
@@ -657,7 +653,6 @@
         return true;
       });
 
-      // Filter Archived Deleted Members
       const filteredArchive = deletedArchive.filter(item => {
         if (!archiveSearch) return true;
         const q = archiveSearch.toLowerCase();
@@ -668,14 +663,12 @@
 
       return (
         <div className="min-h-screen bg-[#050505] text-white flex flex-col">
-          {/* Toast Notification */}
           {toast && (
             <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[250] w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-md border border-zinc-700 text-white px-5 py-3.5 rounded-2xl shadow-2xl font-bold text-sm text-center">
               {toast.type === 'error' ? '⚠️ ' : '✅ '}{toast.message}
             </div>
           )}
 
-          {/* Sticky Top Header */}
           <header className="sticky top-0 z-40">
             <CustomLogoBanner 
               onLogout={handleLogout} 
@@ -684,7 +677,6 @@
             />
           </header>
 
-          {/* Navigation & Action Bar */}
           <div className="bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-3 sm:px-6 py-3">
             <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
               <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0">
@@ -724,11 +716,9 @@
             </div>
           </div>
 
-          {/* Main Content Area */}
           <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto space-y-5 pb-24">
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                {/* Total Members Card */}
                 <div 
                   onClick={() => { setActiveTab('members'); setStatusFilter('All'); }}
                   className="bg-gradient-to-br from-zinc-900/90 to-zinc-950 border border-zinc-800 hover:border-zinc-700 p-4 rounded-2xl shadow-lg cursor-pointer transition-all"
@@ -744,7 +734,6 @@
                   </div>
                 </div>
 
-                {/* Total Collected Revenue */}
                 <div className="bg-gradient-to-br from-green-950/30 to-zinc-950 border border-green-500/30 p-4 rounded-2xl shadow-lg">
                   <div className="flex justify-between items-start">
                     <p className="text-zinc-300 text-xs font-bold">कुल प्राप्त फीस (Received)</p>
@@ -754,7 +743,6 @@
                   <p className="text-[11px] text-zinc-400 font-semibold mt-2">नकद + ऑनलाइन कुल जमा</p>
                 </div>
 
-                {/* Pending Dues Card */}
                 <div 
                   onClick={() => { setActiveTab('payments'); setPaymentFilter('Pending'); }} 
                   className="bg-gradient-to-br from-orange-950/30 to-zinc-950 border border-orange-500/30 hover:border-orange-500/60 p-4 rounded-2xl shadow-lg cursor-pointer transition-all"
@@ -767,7 +755,6 @@
                   <p className="text-[11px] text-orange-300 font-bold mt-2 underline">बकाया लिस्ट देखें →</p>
                 </div>
 
-                {/* Cash vs UPI Breakdown */}
                 <div className="bg-gradient-to-br from-zinc-900/90 to-zinc-950 border border-zinc-800 p-4 rounded-2xl shadow-lg">
                   <div className="flex justify-between items-start">
                     <p className="text-zinc-400 text-xs font-bold">पेमेंट मोड (Cash / UPI)</p>
@@ -781,7 +768,6 @@
               </div>
             )}
 
-            {/* Expiring Soon / Expired Quick Alert Banner */}
             {(expiringSoonCount > 0 || expiredCount > 0) && activeTab !== 'payments' && activeTab !== 'archive' && (
               <div className="bg-gradient-to-r from-zinc-900 via-zinc-950 to-zinc-900 border border-zinc-800 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 text-xs sm:text-sm">
@@ -807,7 +793,6 @@
               </div>
             )}
 
-            {/* Search & Smart Filter Bar */}
             {activeTab !== 'archive' && (
               <div className="bg-zinc-950 border border-zinc-800/90 p-3.5 rounded-2xl flex flex-col sm:flex-row gap-3 justify-between items-center shadow-md">
                 <div className="relative w-full sm:w-96">
@@ -864,7 +849,6 @@
               </div>
             )}
 
-            {/* ARCHIVE / DELETED HISTORY TAB */}
             {activeTab === 'archive' && (
               <div className="space-y-4">
                 <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-3">
@@ -939,7 +923,6 @@
               </div>
             )}
 
-            {/* Responsive Members List */}
             {activeTab !== 'archive' && (
               <>
                 {filteredMembers.length === 0 ? (
@@ -950,7 +933,6 @@
                   </div>
                 ) : (
                   <>
-                    {/* MOBILE & TABLET PREMIUM CARDS VIEW */}
                     <div className="grid grid-cols-1 md:hidden gap-3.5">
                       {filteredMembers.map(member => {
                         const fin = getMemberFinancials(member);
@@ -1068,7 +1050,6 @@
                       })}
                     </div>
 
-                    {/* DESKTOP FULL TABLE VIEW */}
                     <div className="hidden md:block bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl">
                       <div className="overflow-x-auto">
                         <table className="w-full text-left border-collapse">
@@ -1189,7 +1170,6 @@
             )}
           </main>
 
-          {/* Add Member Modal */}
           {isAddModalOpen && (
             <MemberFormModal 
               mode="add"
@@ -1204,7 +1184,6 @@
             />
           )}
 
-          {/* Edit Member Modal */}
           {editingMember && (
             <MemberFormModal 
               mode="edit"
@@ -1220,7 +1199,6 @@
             />
           )}
 
-          {/* Installment & Ledger Modal */}
           {selectedMemberForPayment && (
             <InstallmentModal 
               member={members.find(m => m.id === selectedMemberForPayment.id) || selectedMemberForPayment}
@@ -1242,7 +1220,6 @@
             />
           )}
 
-          {/* Official Receipt Modal */}
           {receiptMember && (
             <ReceiptModal 
               member={members.find(m => m.id === receiptMember.id) || receiptMember}
@@ -1250,7 +1227,6 @@
             />
           )}
 
-          {/* Digital ID Card Modal */}
           {activeIdCardMember && (
             <IdCardModal 
               member={members.find(m => m.id === activeIdCardMember.id) || activeIdCardMember}
@@ -1258,7 +1234,6 @@
             />
           )}
 
-          {/* Delete Member with Reason Modal */}
           {deleteTargetMember && (
             <DeleteReasonModal 
               target={deleteTargetMember}
@@ -1281,7 +1256,6 @@
             />
           )}
 
-          {/* Full Photo Preview */}
           {previewPhoto && (
             <div className="fixed inset-0 z-[210] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewPhoto(null)}>
               <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-3 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
@@ -1296,7 +1270,6 @@
       );
     }
 
-    // --- DELETE REASON SELECTION MODAL ---
     function DeleteReasonModal({ target, onClose, onConfirmDelete }) {
       if (target.isLogoutConfirm) {
         return (
@@ -1423,7 +1396,6 @@
       );
     }
 
-    // --- UNIFIED ADD & EDIT MEMBER MODAL ---
     function MemberFormModal({ mode = 'add', initialMember = null, onClose, onSave, showToast }) {
       const isEdit = mode === 'edit' && initialMember;
       const fin = isEdit ? getMemberFinancials(initialMember) : null;
@@ -1696,7 +1668,6 @@
       );
     }
 
-    // --- INSTALLMENT & EDITABLE PAYMENT HISTORY MODAL ---
     function InstallmentModal({ member, onClose, onUpdateMember, onOpenReceipt, onEditProfile, showToast }) {
       const fin = getMemberFinancials(member);
       const [amount, setAmount] = useState(fin.pendingAmount > 0 ? String(fin.pendingAmount) : '');
@@ -1893,4 +1864,34 @@
                   <p className="font-bold text-sm">{member.name}</p>
                 </div>
                 <div>
-   
+                  <p className="text-zinc-500">Mobile Number:</p>
+                  <p className="font-bold text-sm">{member.phone}</p>
+                </div>
+                <div>
+                  <p className="text-zinc-500">Plan & Join Date:</p>
+                  <p className="font-bold">{member.planDuration}M ({new Date(member.joinDate).toLocaleDateString('en-IN')})</p>
+                </div>
+                <div>
+                  <p className="text-zinc-500">Valid Till:</p>
+                  <p className="font-bold">{expiryDate.toLocaleDateString('en-IN')}</p>
+                </div>
+              </div>
+
+              <div className="space-y-1.5 text-xs">
+                <p className="font-bold text-zinc-700 uppercase">किश्त विवरण (Installments Paid):</p>
+                {fin.payments.length === 0 ? (
+                  <p className="text-zinc-400">कोई फीस जमा नहीं</p>
+                ) : (
+                  fin.payments.map((p, idx) => (
+                    <div key={idx} className="flex justify-between border-b border-zinc-200 py-1">
+                      <span>#{idx + 1} • {new Date(p.date).toLocaleDateString('en-IN')} ({p.mode})</span>
+                      <strong className="text-green-700">₹{Number(p.amount).toLocaleString()}</strong>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              <div className="bg-zinc-900 text-white p-3.5 rounded-xl space-y-1 text-xs">
+                <div className="flex justify-between">
+                  <span>कुल तय फीस (Agreed Fee):</span>
+                  
