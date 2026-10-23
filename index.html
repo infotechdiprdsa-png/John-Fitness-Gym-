@@ -49,10 +49,46 @@
       background: #dc2626;
       border-radius: 9999px;
     }
+
+    /* --- PROFESSIONAL PORTRAIT PRINT STYLES --- */
     @media print {
-      body * { visibility: hidden; }
-      #printable-receipt, #printable-receipt *, #printable-id-card, #printable-id-card * { visibility: visible; }
-      #printable-receipt, #printable-id-card { position: absolute; left: 0; top: 0; width: 100%; background: white !important; color: black !important; box-shadow: none !important; }
+      @page {
+        size: portrait;
+        margin: 10mm;
+      }
+      body * { 
+        visibility: hidden !important; 
+      }
+      #printable-receipt, #printable-receipt *, #printable-id-card, #printable-id-card * { 
+        visibility: visible !important; 
+      }
+      #printable-receipt {
+        position: fixed !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        background: white !important; 
+        color: black !important; 
+        box-shadow: none !important;
+        border: 2px solid #dc2626 !important;
+        padding: 20px !important;
+        margin: 0 !important;
+        border-radius: 12px !important;
+      }
+      #printable-id-card {
+        position: fixed !important;
+        left: 50% !important;
+        top: 20mm !important;
+        transform: translateX(-50%) !important;
+        width: 85mm !important;
+        background: #09090b !important; 
+        color: white !important; 
+        box-shadow: none !important;
+        border: 3px solid #dc2626 !important;
+        padding: 20px !important;
+        border-radius: 20px !important;
+      }
     }
   </style>
 </head>
@@ -67,7 +103,7 @@
 
     window.firebaseAppInit = async function() {
       try {
-        const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'john-fitness-owner-app-v5';
+        const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'john-fitness-owner-app-v6';
         let firebaseConfig = {
           apiKey: "AIzaSyDummyKeyForLocalDevFallback12345",
           authDomain: "john-fitness.firebaseapp.com",
@@ -106,8 +142,8 @@
     // --- CONSTANTS ---
     const ALLOWED_NUMBERS = ['9461627473', '9660169104'];
     const DEMO_OTP = '159357';
-    const LOCAL_STORAGE_KEY = 'john_fitness_members_local_v5';
-    const LOCAL_ARCHIVE_KEY = 'john_fitness_archive_local_v5';
+    const LOCAL_STORAGE_KEY = 'john_fitness_members_local_v6';
+    const LOCAL_ARCHIVE_KEY = 'john_fitness_archive_local_v6';
 
     // --- HELPER: IMAGE COMPRESSION ---
     const compressImage = (file) => {
@@ -317,7 +353,6 @@
     }
 
     function App() {
-      // Load initially from localStorage instantly so app never shows black screen
       const [members, setMembers] = useState(() => {
         try {
           const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
@@ -352,6 +387,7 @@
       const [activeIdCardMember, setActiveIdCardMember] = useState(null);
       const [previewPhoto, setPreviewPhoto] = useState(null);
       const [deleteTargetMember, setDeleteTargetMember] = useState(null);
+      const [historyMemberModal, setHistoryMemberModal] = useState(null);
 
       // Search & Filters
       const [searchTerm, setSearchTerm] = useState('');
@@ -377,7 +413,6 @@
                 localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cloudMembers));
                 setIsCloudSynced(true);
               } else if (members.length > 0) {
-                // Seed cloud with local items if cloud is empty
                 members.forEach(m => {
                   setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(m.id)), m);
                 });
@@ -536,7 +571,6 @@
         reader.readAsText(file);
       };
 
-      // --- LOGIN SCREEN (Without Subtitle Text as requested) ---
       if (!isLoggedIn) {
         return (
           <div className="min-h-screen bg-[#050505] flex flex-col justify-between p-4 relative overflow-hidden">
@@ -618,7 +652,6 @@
         );
       }
 
-      // --- CALCULATE DASHBOARD METRICS ---
       let totalRevenue = 0, totalPending = 0, cashTotal = 0, onlineTotal = 0;
       let activeCount = 0, expiringSoonCount = 0, expiredCount = 0;
 
@@ -640,7 +673,6 @@
         }
       });
 
-      // Filter Members List
       const filteredMembers = members.filter(m => {
         const matchesSearch = (m.name && m.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
                               (m.phone && m.phone.includes(searchTerm));
@@ -661,7 +693,6 @@
         return true;
       });
 
-      // Filter Archived Deleted Members
       const filteredArchive = deletedArchive.filter(item => {
         if (!archiveSearch) return true;
         const q = archiveSearch.toLowerCase();
@@ -672,14 +703,12 @@
 
       return (
         <div className="min-h-screen bg-[#050505] text-white flex flex-col">
-          {/* Toast Notification */}
           {toast && (
             <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[250] w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-md border border-zinc-700 text-white px-5 py-3.5 rounded-2xl shadow-2xl font-bold text-sm text-center">
               {toast.type === 'error' ? '⚠️ ' : '✅ '}{toast.message}
             </div>
           )}
 
-          {/* Sticky Top Header */}
           <header className="sticky top-0 z-40">
             <CustomLogoBanner 
               onLogout={handleLogout} 
@@ -688,7 +717,6 @@
             />
           </header>
 
-          {/* Navigation & Action Bar */}
           <div className="bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-3 sm:px-6 py-3">
             <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
               <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0">
@@ -728,7 +756,6 @@
             </div>
           </div>
 
-          {/* Main Content Area */}
           <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto space-y-5 pb-24">
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -862,7 +889,6 @@
               </div>
             )}
 
-            {/* ARCHIVE / DELETED HISTORY TAB */}
             {activeTab === 'archive' && (
               <div className="space-y-4">
                 <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-3">
@@ -937,7 +963,6 @@
               </div>
             )}
 
-            {/* Responsive Members List */}
             {activeTab !== 'archive' && (
               <>
                 {filteredMembers.length === 0 ? (
@@ -1035,6 +1060,13 @@
                                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
                               >
                                 ✏️ एडिट
+                              </button>
+                              <button
+                                onClick={() => setHistoryMemberModal(member)}
+                                className="bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
+                                title="एडिट हिस्ट्री देखें"
+                              >
+                                📜 एडिट हिस्ट्री {member.editLogs?.length ? `(${member.editLogs.length})` : ''}
                               </button>
                               {fin.pendingAmount > 0 && (
                                 <button
@@ -1155,6 +1187,13 @@
                                       >
                                         ✏️ एडिट
                                       </button>
+                                      <button
+                                        onClick={() => setHistoryMemberModal(member)}
+                                        className="bg-purple-600/20 hover:bg-purple-600 text-purple-300 hover:text-white border border-purple-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                                        title="एडिट हिस्ट्री देखें"
+                                      >
+                                        📜 हिस्ट्री {member.editLogs?.length ? `(${member.editLogs.length})` : ''}
+                                      </button>
                                       {fin.pendingAmount > 0 && (
                                         <button
                                           onClick={() => sendWhatsAppDueAlert(member)}
@@ -1185,7 +1224,6 @@
             )}
           </main>
 
-          {/* Add Member Modal */}
           {isAddModalOpen && (
             <MemberFormModal 
               mode="add"
@@ -1200,7 +1238,6 @@
             />
           )}
 
-          {/* Edit Member Modal */}
           {editingMember && (
             <MemberFormModal 
               mode="edit"
@@ -1209,14 +1246,13 @@
               onSave={(updatedMember) => {
                 const updatedList = members.map(m => m.id === updatedMember.id ? updatedMember : m);
                 saveMemberToCloudAndLocal(updatedList, updatedMember);
-                showToast(`${updatedMember.name} की जानकारी अपडेट हो गई!`);
+                showToast(`${updatedMember.name} की जानकारी अपडेट और हिस्ट्री में दर्ज हो गई!`);
                 setEditingMember(null);
               }}
               showToast={showToast}
             />
           )}
 
-          {/* Installment & Ledger Modal */}
           {selectedMemberForPayment && (
             <InstallmentModal 
               member={members.find(m => m.id === selectedMemberForPayment.id) || selectedMemberForPayment}
@@ -1238,7 +1274,6 @@
             />
           )}
 
-          {/* Official Receipt Modal */}
           {receiptMember && (
             <ReceiptModal 
               member={members.find(m => m.id === receiptMember.id) || receiptMember}
@@ -1246,7 +1281,6 @@
             />
           )}
 
-          {/* Digital ID Card Modal */}
           {activeIdCardMember && (
             <IdCardModal 
               member={members.find(m => m.id === activeIdCardMember.id) || activeIdCardMember}
@@ -1254,7 +1288,13 @@
             />
           )}
 
-          {/* Delete Member with Reason Modal */}
+          {historyMemberModal && (
+            <EditHistoryModal 
+              member={members.find(m => m.id === historyMemberModal.id) || historyMemberModal}
+              onClose={() => setHistoryMemberModal(null)}
+            />
+          )}
+
           {deleteTargetMember && (
             <DeleteReasonModal 
               target={deleteTargetMember}
@@ -1277,7 +1317,6 @@
             />
           )}
 
-          {/* Full Photo Preview */}
           {previewPhoto && (
             <div className="fixed inset-0 z-[210] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewPhoto(null)}>
               <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-3 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
@@ -1292,7 +1331,61 @@
       );
     }
 
-    // --- DELETE REASON SELECTION MODAL ---
+    // --- EDIT HISTORY AUDIT TRAIL MODAL ---
+    function EditHistoryModal({ member, onClose }) {
+      const logs = Array.isArray(member.editLogs) ? member.editLogs : [];
+
+      return (
+        <div className="fixed inset-0 z-[215] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-lg w-full p-5 space-y-4 my-auto max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="flex justify-between items-center border-b border-zinc-800 pb-3">
+              <div>
+                <h3 className="text-lg font-black text-purple-400">📜 मेंबर एडिट हिस्ट्री (Edit Logs)</h3>
+                <p className="text-xs text-zinc-400">{member.name} ({member.phone})</p>
+              </div>
+              <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg font-bold bg-zinc-900 w-8 h-8 rounded-full">✕</button>
+            </div>
+
+            {logs.length === 0 ? (
+              <div className="text-center py-8 text-zinc-500 text-xs">
+                इस मेंबर की जानकारी में अभी तक कोई बदलाव (Edit) नहीं किया गया है।
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {logs.map((log, idx) => (
+                  <div key={idx} className="bg-zinc-900 border border-zinc-800 p-3.5 rounded-2xl space-y-2 text-xs">
+                    <div className="flex justify-between items-center border-b border-zinc-800 pb-1.5">
+                      <span className="font-bold text-zinc-300">अपडेट #{logs.length - idx}</span>
+                      <span className="text-purple-400 font-semibold">
+                        {log.timestamp ? new Date(log.timestamp).toLocaleString('en-IN') : 'N/A'}
+                      </span>
+                    </div>
+                    <div className="space-y-1">
+                      {Array.isArray(log.changes) && log.changes.map((change, cIdx) => (
+                        <div key={cIdx} className="flex justify-between text-[11px] bg-zinc-950/60 p-2 rounded-xl">
+                          <span className="text-zinc-400 font-bold">{change.field}:</span>
+                          <div className="text-right">
+                            <span className="line-through text-red-400 mr-2">{change.oldValue || 'खाली'}</span>
+                            <span className="text-green-400 font-bold">➜ {change.newValue || 'खाली'}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="pt-2 text-center">
+              <button onClick={onClose} className="bg-zinc-800 hover:bg-zinc-700 text-white px-6 py-2.5 rounded-xl text-xs font-bold">
+                बंद करें
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     function DeleteReasonModal({ target, onClose, onConfirmDelete }) {
       if (target.isLogoutConfirm) {
         return (
@@ -1419,7 +1512,6 @@
       );
     }
 
-    // --- UNIFIED ADD & EDIT MEMBER MODAL ---
     function MemberFormModal({ mode = 'add', initialMember = null, onClose, onSave, showToast }) {
       const isEdit = mode === 'edit' && initialMember;
       const fin = isEdit ? getMemberFinancials(initialMember) : null;
@@ -1463,8 +1555,42 @@
         }
 
         if (isEdit) {
+          const changes = [];
+          if (initialMember.name !== formData.name.trim()) {
+            changes.push({ field: 'नाम (Name)', oldValue: initialMember.name, newValue: formData.name.trim() });
+          }
+          if (initialMember.phone !== formData.phone.trim()) {
+            changes.push({ field: 'मोबाइल (Phone)', oldValue: initialMember.phone, newValue: formData.phone.trim() });
+          }
+          if (initialMember.batch !== formData.batch) {
+            changes.push({ field: 'बैच (Batch)', oldValue: initialMember.batch, newValue: formData.batch });
+          }
+          if (String(initialMember.planDuration) !== String(formData.planDuration)) {
+            changes.push({ field: 'प्लान (Duration)', oldValue: `${initialMember.planDuration} Month`, newValue: `${formData.planDuration} Month` });
+          }
+          if (initialMember.joinDate !== formData.joinDate) {
+            changes.push({ field: 'ज्वाइनिंग डेट', oldValue: initialMember.joinDate, newValue: formData.joinDate });
+          }
+          const oldFee = Number(initialMember.totalFee ?? initialMember.feeAmount ?? 0);
+          if (oldFee !== agreed) {
+            changes.push({ field: 'कुल तय फीस', oldValue: `₹${oldFee}`, newValue: `₹${agreed}` });
+          }
+          if ((initialMember.notes || '') !== formData.notes.trim()) {
+            changes.push({ field: 'नोट्स', oldValue: initialMember.notes || 'कोई नहीं', newValue: formData.notes.trim() || 'कोई नहीं' });
+          }
+
+          const existingLogs = Array.isArray(initialMember.editLogs) ? initialMember.editLogs : [];
+          const newEditLogs = changes.length > 0 ? [
+            {
+              timestamp: new Date().toISOString(),
+              changes
+            },
+            ...existingLogs
+          ] : existingLogs;
+
           const existingPayments = fin.payments;
           const updatedPending = Math.max(0, agreed - fin.paidAmount);
+
           onSave({
             ...initialMember,
             name: formData.name.trim(),
@@ -1479,7 +1605,8 @@
             pendingAmount: updatedPending,
             feeStatus: updatedPending === 0 && agreed > 0 ? 'Paid' : 'Pending',
             notes: formData.notes.trim(),
-            payments: existingPayments
+            payments: existingPayments,
+            editLogs: newEditLogs
           });
         } else {
           const paidNow = Number(formData.initialPaid) || 0;
@@ -1507,6 +1634,7 @@
             paymentMode: formData.paymentMode,
             notes: formData.notes.trim(),
             payments,
+            editLogs: [],
             createdAt: new Date().toISOString()
           });
         }
@@ -1521,7 +1649,7 @@
                   {isEdit ? '✏️ मेंबर प्रोफाइल एडिट करें' : '🏋️ नया एडमिशन (New Member)'}
                 </h3>
                 <p className="text-xs text-zinc-400">
-                  {isEdit ? 'नाम, मोबाइल, फोटो, प्लान या तय फीस में बदलाव करें' : 'कैंडिडेट की फोटो और प्लान की जानकारी भरें'}
+                  {isEdit ? 'बदलाव करने पर तारीख और एडिट हिस्ट्री सुरक्षित रहेगी' : 'कैंडिडेट की फोटो और प्लान की जानकारी भरें'}
                 </p>
               </div>
               <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg font-bold bg-zinc-900 w-8 h-8 rounded-full">✕</button>
@@ -1692,7 +1820,6 @@
       );
     }
 
-    // --- INSTALLMENT & EDITABLE PAYMENT HISTORY MODAL ---
     function InstallmentModal({ member, onClose, onUpdateMember, onOpenReceipt, onEditProfile, showToast }) {
       const fin = getMemberFinancials(member);
       const [amount, setAmount] = useState(fin.pendingAmount > 0 ? String(fin.pendingAmount) : '');
@@ -1864,6 +1991,7 @@
       );
     }
 
+    // --- PROFESSIONALLY FORMATTED PORTRAIT RECEIPT MODAL ---
     function ReceiptModal({ member, onClose }) {
       const fin = getMemberFinancials(member);
       const { expiryDate } = getMembershipTiming(member.joinDate, member.planDuration);
@@ -1871,7 +1999,7 @@
       return (
         <div className="fixed inset-0 z-[195] bg-black/90 flex items-center justify-center p-3 overflow-y-auto">
           <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-md w-full p-5 space-y-4 my-auto">
-            <div id="printable-receipt" className="bg-white text-zinc-900 p-5 rounded-2xl border-t-8 border-red-600 space-y-4 shadow-xl">
+            <div id="printable-receipt" className="bg-white text-zinc-900 p-6 rounded-2xl border-t-8 border-red-600 space-y-4 shadow-xl">
               <div className="flex items-center justify-between border-b-2 border-zinc-200 pb-3">
                 <div>
                   <h2 className="text-2xl font-black tracking-tight text-red-600">JOHN FITNESS</h2>
@@ -1947,7 +2075,7 @@
                 onClick={() => window.print()}
                 className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 px-4 rounded-xl text-xs"
               >
-                🖨️ प्रिंट / PDF
+                🖨️ पोर्ट्रेट प्रिंट / PDF
               </button>
               <button
                 onClick={onClose}
@@ -1961,6 +2089,7 @@
       );
     }
 
+    // --- PROFESSIONALLY FORMATTED PORTRAIT ID CARD MODAL ---
     function IdCardModal({ member, onClose }) {
       const { expiryDate } = getMembershipTiming(member.joinDate, member.planDuration);
       const fin = getMemberFinancials(member);
@@ -1986,7 +2115,7 @@
         <div className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-3 overflow-y-auto">
           <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-sm w-full p-5 space-y-4 my-auto">
             
-            <div id="printable-id-card" className="bg-gradient-to-br from-zinc-900 via-zinc-950 to-zinc-900 text-white rounded-3xl border-2 border-red-600 p-5 shadow-2xl relative overflow-hidden space-y-4">
+            <div id="printable-id-card" className="bg-gradient-to-br from-zinc-900 via-zinc-950 to-zinc-900 text-white rounded-3xl border-2 border-red-600 p-6 shadow-2xl relative overflow-hidden space-y-4">
               <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-red-600/10 rounded-full blur-2xl pointer-events-none"></div>
 
               <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
@@ -2004,7 +2133,7 @@
                   </div>
                 </div>
                 <span className="bg-red-600/20 text-red-400 border border-red-500/30 text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
-                  Active Member
+                  Active
                 </span>
               </div>
 
@@ -2057,7 +2186,7 @@
                 onClick={() => window.print()}
                 className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2.5 rounded-xl text-xs"
               >
-                🖨️ ID Card प्रिंट करें
+                🖨️ पोर्ट्रेट ID Card प्रिंट करें
               </button>
               <button
                 onClick={onClose}
