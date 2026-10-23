@@ -67,7 +67,7 @@
 
     window.firebaseAppInit = async function() {
       try {
-        const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'john-fitness-owner-app-v4';
+        const appId = (typeof __app_id !== 'undefined' && __app_id) ? __app_id : 'john-fitness-owner-app-v5';
         let firebaseConfig = {
           apiKey: "AIzaSyDummyKeyForLocalDevFallback12345",
           authDomain: "john-fitness.firebaseapp.com",
@@ -93,7 +93,7 @@
         window.FB = { db, auth, appId, collection, doc, setDoc, deleteDoc, onSnapshot, query };
         window.dispatchEvent(new Event('firebase-ready'));
       } catch (e) {
-        console.warn("Running in offline localStorage fallback mode:", e);
+        console.warn("Running in robust offline fallback mode:", e);
         window.dispatchEvent(new Event('firebase-ready'));
       }
     };
@@ -106,7 +106,8 @@
     // --- CONSTANTS ---
     const ALLOWED_NUMBERS = ['9461627473', '9660169104'];
     const DEMO_OTP = '159357';
-    const LOCAL_STORAGE_KEY = 'john_fitness_members_local_v4';
+    const LOCAL_STORAGE_KEY = 'john_fitness_members_local_v5';
+    const LOCAL_ARCHIVE_KEY = 'john_fitness_archive_local_v5';
 
     // --- HELPER: IMAGE COMPRESSION ---
     const compressImage = (file) => {
@@ -316,8 +317,21 @@
     }
 
     function App() {
-      const [members, setMembers] = useState([]);
-      const [deletedArchive, setDeletedArchive] = useState([]);
+      // Load initially from localStorage instantly so app never shows black screen
+      const [members, setMembers] = useState(() => {
+        try {
+          const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+          return saved ? JSON.parse(saved) : [];
+        } catch(e) { return []; }
+      });
+
+      const [deletedArchive, setDeletedArchive] = useState(() => {
+        try {
+          const saved = localStorage.getItem(LOCAL_ARCHIVE_KEY);
+          return saved ? JSON.parse(saved) : [];
+        } catch(e) { return []; }
+      });
+
       const [isCloudSynced, setIsCloudSynced] = useState(false);
       const [activeTab, setActiveTab] = useState('dashboard');
       const [toast, setToast] = useState(null);
@@ -345,7 +359,7 @@
       const [paymentFilter, setPaymentFilter] = useState('All');
       const [archiveSearch, setArchiveSearch] = useState('');
 
-      // --- CLOUD FIREBASE SYNC ON LOAD ---
+      // --- HYBRID LOCAL & CLOUD SYNC ON MOUNT ---
       useEffect(() => {
         const initCloudSync = () => {
           if (window.FB && window.FB.db) {
@@ -360,24 +374,16 @@
               });
               if (cloudMembers.length > 0) {
                 setMembers(cloudMembers);
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(cloudMembers));
                 setIsCloudSynced(true);
-              } else {
-                const localSaved = localStorage.getItem(LOCAL_STORAGE_KEY);
-                if (localSaved) {
-                  try {
-                    const parsedLocal = JSON.parse(localSaved);
-                    if (parsedLocal.length > 0) {
-                      setMembers(parsedLocal);
-                      parsedLocal.forEach(m => {
-                        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(m.id)), m);
-                      });
-                    }
-                  } catch(e) {}
-                }
+              } else if (members.length > 0) {
+                // Seed cloud with local items if cloud is empty
+                members.forEach(m => {
+                  setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(m.id)), m);
+                });
               }
             }, (err) => {
-              console.error("Cloud sync error, fallback to local:", err);
-              loadLocalFallback();
+              console.warn("Cloud sync offline mode active:", err);
             });
 
             // 2. Deleted Archive Realtime Sync
@@ -389,20 +395,16 @@
               });
               if (cloudArchive.length > 0) {
                 setDeletedArchive(cloudArchive);
+                localStorage.setItem(LOCAL_ARCHIVE_KEY, JSON.stringify(cloudArchive));
+              } else if (deletedArchive.length > 0) {
+                deletedArchive.forEach(item => {
+                  setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deleted_archive', String(item.archiveId)), item);
+                });
               }
             }, (err) => {
-              console.error("Archive sync error:", err);
+              console.warn("Archive sync offline mode active:", err);
             });
-          } else {
-            loadLocalFallback();
           }
-        };
-
-        const loadLocalFallback = () => {
-          try {
-            const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-            if (saved) setMembers(JSON.parse(saved));
-          } catch(e) {}
         };
 
         if (window.FB && window.FB.db) {
@@ -428,8 +430,7 @@
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(targetMember.id)), targetMember);
             setIsCloudSynced(true);
           } catch (e) {
-            console.error("Cloud save failed:", e);
-            showToast("क्लाउड सेव में समस्या, लोकल सेव सुरक्षित है।", "error");
+            console.error("Cloud save failed, local storage safe:", e);
           }
         }
       };
@@ -441,6 +442,7 @@
 
         const newArchive = [archiveObj, ...deletedArchive];
         setDeletedArchive(newArchive);
+        localStorage.setItem(LOCAL_ARCHIVE_KEY, JSON.stringify(newArchive));
 
         if (window.FB && window.FB.db) {
           try {
@@ -480,7 +482,7 @@
         setDeleteTargetMember({
           isLogoutConfirm: true,
           title: "लॉगआउट (Log out) करें?",
-          message: "क्या आप एडमिन पैनल से लॉगआउट करना चाहते हैं? आपका सारा डेटा क्लाउड पर सुरक्षित रहेगा।"
+          message: "क्या आप एडमिन पैनल से लॉगआउट करना चाहते हैं? आपका सारा डेटा सुरक्षित रहेगा।"
         });
       };
 
@@ -512,7 +514,10 @@
               importedMembers = parsed;
             } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.members)) {
               importedMembers = parsed.members;
-              if (Array.isArray(parsed.deletedArchive)) setDeletedArchive(parsed.deletedArchive);
+              if (Array.isArray(parsed.deletedArchive)) {
+                setDeletedArchive(parsed.deletedArchive);
+                localStorage.setItem(LOCAL_ARCHIVE_KEY, JSON.stringify(parsed.deletedArchive));
+              }
             }
             setMembers(importedMembers);
             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(importedMembers));
@@ -523,7 +528,7 @@
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(m.id)), m);
               }
             }
-            showToast(`${importedMembers.length} मेंबर्स का डेटा क्लाउड और लोकल में रिस्टोर हो गया!`);
+            showToast(`${importedMembers.length} मेंबर्स का डेटा रिस्टोर हो गया!`);
           } catch (err) {
             showToast("अमान्य बैकअप फाइल!", "error");
           }
@@ -531,6 +536,7 @@
         reader.readAsText(file);
       };
 
+      // --- LOGIN SCREEN (Without Subtitle Text as requested) ---
       if (!isLoggedIn) {
         return (
           <div className="min-h-screen bg-[#050505] flex flex-col justify-between p-4 relative overflow-hidden">
@@ -607,11 +613,12 @@
                 </form>
               </div>
             </div>
-            <div className="text-center text-zinc-600 text-xs z-10">☁️ Cloud Synced & Protected • John Fitness Official Management</div>
+            <div className="text-center text-zinc-600 text-xs z-10">☁️ Cloud & Local Synced • John Fitness Official Management</div>
           </div>
         );
       }
 
+      // --- CALCULATE DASHBOARD METRICS ---
       let totalRevenue = 0, totalPending = 0, cashTotal = 0, onlineTotal = 0;
       let activeCount = 0, expiringSoonCount = 0, expiredCount = 0;
 
@@ -633,6 +640,7 @@
         }
       });
 
+      // Filter Members List
       const filteredMembers = members.filter(m => {
         const matchesSearch = (m.name && m.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
                               (m.phone && m.phone.includes(searchTerm));
@@ -653,6 +661,7 @@
         return true;
       });
 
+      // Filter Archived Deleted Members
       const filteredArchive = deletedArchive.filter(item => {
         if (!archiveSearch) return true;
         const q = archiveSearch.toLowerCase();
@@ -663,12 +672,14 @@
 
       return (
         <div className="min-h-screen bg-[#050505] text-white flex flex-col">
+          {/* Toast Notification */}
           {toast && (
             <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[250] w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-md border border-zinc-700 text-white px-5 py-3.5 rounded-2xl shadow-2xl font-bold text-sm text-center">
               {toast.type === 'error' ? '⚠️ ' : '✅ '}{toast.message}
             </div>
           )}
 
+          {/* Sticky Top Header */}
           <header className="sticky top-0 z-40">
             <CustomLogoBanner 
               onLogout={handleLogout} 
@@ -677,6 +688,7 @@
             />
           </header>
 
+          {/* Navigation & Action Bar */}
           <div className="bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-3 sm:px-6 py-3">
             <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
               <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0">
@@ -703,7 +715,7 @@
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 <div className="hidden lg:flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-xl text-xs font-semibold text-zinc-400">
                   <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                  <span>Cloud Synced</span>
+                  <span>Data Secure</span>
                 </div>
                 <button 
                   onClick={() => setIsAddModalOpen(true)}
@@ -716,6 +728,7 @@
             </div>
           </div>
 
+          {/* Main Content Area */}
           <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto space-y-5 pb-24">
             {activeTab === 'dashboard' && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -849,12 +862,13 @@
               </div>
             )}
 
+            {/* ARCHIVE / DELETED HISTORY TAB */}
             {activeTab === 'archive' && (
               <div className="space-y-4">
                 <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-3">
                   <div>
                     <h3 className="text-base font-black text-white">🗂️ परमानेंट डिलीटेड मेंबर्स हिस्ट्री (Permanent Archive)</h3>
-                    <p className="text-xs text-zinc-400">जिम से हटाए गए सभी मेंबर्स और उनके हटाने का कारण सुरक्षित क्लाउड रिकॉर्ड के रूप में यहां दर्ज है।</p>
+                    <p className="text-xs text-zinc-400">जिम से हटाए गए सभी मेंबर्स और उनके हटाने का कारण सुरक्षित रिकॉर्ड के रूप में यहां दर्ज है।</p>
                   </div>
                   <div className="w-full sm:w-72">
                     <input 
@@ -923,6 +937,7 @@
               </div>
             )}
 
+            {/* Responsive Members List */}
             {activeTab !== 'archive' && (
               <>
                 {filteredMembers.length === 0 ? (
@@ -1170,6 +1185,7 @@
             )}
           </main>
 
+          {/* Add Member Modal */}
           {isAddModalOpen && (
             <MemberFormModal 
               mode="add"
@@ -1177,13 +1193,14 @@
               onSave={(newMember) => {
                 const updatedList = [newMember, ...members];
                 saveMemberToCloudAndLocal(updatedList, newMember);
-                showToast(`${newMember.name} का एडमिशन क्लाउड पर सेव हो गया!`);
+                showToast(`${newMember.name} का एडमिशन सेव हो गया!`);
                 setIsAddModalOpen(false);
               }}
               showToast={showToast}
             />
           )}
 
+          {/* Edit Member Modal */}
           {editingMember && (
             <MemberFormModal 
               mode="edit"
@@ -1199,6 +1216,7 @@
             />
           )}
 
+          {/* Installment & Ledger Modal */}
           {selectedMemberForPayment && (
             <InstallmentModal 
               member={members.find(m => m.id === selectedMemberForPayment.id) || selectedMemberForPayment}
@@ -1220,6 +1238,7 @@
             />
           )}
 
+          {/* Official Receipt Modal */}
           {receiptMember && (
             <ReceiptModal 
               member={members.find(m => m.id === receiptMember.id) || receiptMember}
@@ -1227,6 +1246,7 @@
             />
           )}
 
+          {/* Digital ID Card Modal */}
           {activeIdCardMember && (
             <IdCardModal 
               member={members.find(m => m.id === activeIdCardMember.id) || activeIdCardMember}
@@ -1234,6 +1254,7 @@
             />
           )}
 
+          {/* Delete Member with Reason Modal */}
           {deleteTargetMember && (
             <DeleteReasonModal 
               target={deleteTargetMember}
@@ -1256,6 +1277,7 @@
             />
           )}
 
+          {/* Full Photo Preview */}
           {previewPhoto && (
             <div className="fixed inset-0 z-[210] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewPhoto(null)}>
               <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-3 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
@@ -1270,6 +1292,7 @@
       );
     }
 
+    // --- DELETE REASON SELECTION MODAL ---
     function DeleteReasonModal({ target, onClose, onConfirmDelete }) {
       if (target.isLogoutConfirm) {
         return (
@@ -1381,7 +1404,7 @@
               </div>
 
               <div className="bg-zinc-900/60 border border-zinc-800 p-3 rounded-xl text-[11px] text-zinc-400">
-                ℹ️ यह रिकॉर्ड परमानेंट डिलीटेड हिस्ट्री (Archive) में क्लाउड पर सुरक्षित हो जाएगा।
+                ℹ️ यह रिकॉर्ड परमानेंट डिलीटेड हिस्ट्री (Archive) में सुरक्षित हो जाएगा।
               </div>
 
               <div className="flex justify-end gap-2.5 pt-2">
@@ -1396,6 +1419,7 @@
       );
     }
 
+    // --- UNIFIED ADD & EDIT MEMBER MODAL ---
     function MemberFormModal({ mode = 'add', initialMember = null, onClose, onSave, showToast }) {
       const isEdit = mode === 'edit' && initialMember;
       const fin = isEdit ? getMemberFinancials(initialMember) : null;
@@ -1668,6 +1692,7 @@
       );
     }
 
+    // --- INSTALLMENT & EDITABLE PAYMENT HISTORY MODAL ---
     function InstallmentModal({ member, onClose, onUpdateMember, onOpenReceipt, onEditProfile, showToast }) {
       const fin = getMemberFinancials(member);
       const [amount, setAmount] = useState(fin.pendingAmount > 0 ? String(fin.pendingAmount) : '');
@@ -1894,4 +1919,161 @@
               <div className="bg-zinc-900 text-white p-3.5 rounded-xl space-y-1 text-xs">
                 <div className="flex justify-between">
                   <span>कुल तय फीस (Agreed Fee):</span>
-                  
+                  <strong>₹{fin.totalAgreed.toLocaleString()}</strong>
+                </div>
+                <div className="flex justify-between text-green-400">
+                  <span>कुल जमा राशि (Total Paid):</span>
+                  <strong>₹{fin.paidAmount.toLocaleString()}</strong>
+                </div>
+                <div className="flex justify-between text-orange-400 border-t border-zinc-700 pt-1.5 text-sm font-black">
+                  <span>बकाया राशि (Balance Due):</span>
+                  <span>₹{fin.pendingAmount.toLocaleString()}</span>
+                </div>
+              </div>
+
+              <p className="text-center text-[11px] font-bold text-zinc-500 pt-1">
+                🙏 धन्यवाद! स्वस्थ रहें, फिट रहें • JOHN FITNESS
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                onClick={() => sendWhatsAppReceipt(member)}
+                className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl text-xs shadow-lg"
+              >
+                📲 WhatsApp पर रसीद भेजें
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 px-4 rounded-xl text-xs"
+              >
+                🖨️ प्रिंट / PDF
+              </button>
+              <button
+                onClick={onClose}
+                className="bg-zinc-900 text-zinc-400 hover:text-white font-bold py-3 px-4 rounded-xl text-xs"
+              >
+                बंद करें
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function IdCardModal({ member, onClose }) {
+      const { expiryDate } = getMembershipTiming(member.joinDate, member.planDuration);
+      const fin = getMemberFinancials(member);
+      const cleanPhone = (member.phone || '').replace(/\D/g, '').slice(-10);
+
+      const sendWhatsAppIdCard = () => {
+        const msg = `*🪪 JOHN FITNESS - OFFICIAL MEMBERSHIP ID CARD 🪪*\n\n` +
+          `नमस्ते *${member.name}* जी,\n` +
+          `आपका John Fitness जिम का डिजिटल आईडी कार्ड विवरण नीचे दिया गया है:\n\n` +
+          `👤 *नाम:* ${member.name}\n` +
+          `📞 *मोबाइल:* ${member.phone}\n` +
+          (member.batch ? `⏰ *शिफ्ट/बैच:* ${member.batch}\n` : '') +
+          `📅 *एडमिशन तिथि:* ${new Date(member.joinDate).toLocaleDateString('en-IN')}\n` +
+          `⏳ *वैधता समाप्ति (Valid Till):* ${expiryDate.toLocaleDateString('en-IN')}\n` +
+          `📋 *प्लान:* ${member.planDuration} Month(s)\n` +
+          `💳 *फीस स्टेटस:* ${fin.pendingAmount === 0 ? 'Fully Paid ✅' : `Balance Due ₹${fin.pendingAmount} ⚠️`}\n\n` +
+          `💪 *स्वस्थ रहें, फिट रहें - JOHN FITNESS*`;
+
+        window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+      };
+
+      return (
+        <div className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center p-3 overflow-y-auto">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-sm w-full p-5 space-y-4 my-auto">
+            
+            <div id="printable-id-card" className="bg-gradient-to-br from-zinc-900 via-zinc-950 to-zinc-900 text-white rounded-3xl border-2 border-red-600 p-5 shadow-2xl relative overflow-hidden space-y-4">
+              <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-red-600/10 rounded-full blur-2xl pointer-events-none"></div>
+
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <svg viewBox="0 0 155 110" className="w-10 h-8 shrink-0">
+                    <rect x="4" y="34" width="12" height="42" rx="2" fill="#fff" />
+                    <rect x="20" y="23" width="15" height="64" rx="2" fill="#fff" />
+                    <rect x="35" y="47" width="88" height="16" fill="#fff" />
+                    <path d="M 50 10 H 80 V 76 C 80 96 66 104 46 104 C 35 104 28 100 25 95 L 35 83 C 38 86 42 88 46 88 C 56 88 60 83 60 74 V 25 H 50 Z" fill="#DC2626" stroke="#fff" strokeWidth="2.5" />
+                    <path d="M 88 10 H 146 V 26 H 108 V 47 H 136 V 63 H 108 V 102 H 88 Z" fill="#DC2626" stroke="#fff" strokeWidth="2.5" />
+                  </svg>
+                  <div>
+                    <h3 className="font-black text-base tracking-tight leading-none text-red-500">JOHN FITNESS</h3>
+                    <p className="text-[9px] font-bold text-zinc-400 tracking-wider">OFFICIAL ID CARD</p>
+                  </div>
+                </div>
+                <span className="bg-red-600/20 text-red-400 border border-red-500/30 text-[9px] font-black px-2 py-0.5 rounded-full uppercase">
+                  Active Member
+                </span>
+              </div>
+
+              <div className="flex flex-col items-center text-center space-y-2 pt-1">
+                {member.photo ? (
+                  <img src={member.photo} alt={member.name} className="w-24 h-24 rounded-2xl object-cover border-2 border-red-500 shadow-lg" />
+                ) : (
+                  <div className="w-24 h-24 rounded-2xl bg-zinc-800 border border-zinc-700 flex items-center justify-center font-black text-red-500 text-3xl shadow-inner">
+                    {member.name ? member.name.charAt(0) : 'M'}
+                  </div>
+                )}
+                <div>
+                  <h4 className="font-black text-xl text-white tracking-wide">{member.name}</h4>
+                  <p className="text-xs text-zinc-400 font-bold mt-0.5">📞 {member.phone}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 bg-zinc-900/80 border border-zinc-800/80 p-3 rounded-2xl text-[11px]">
+                <div>
+                  <span className="text-zinc-500 block">एडमिशन तिथि:</span>
+                  <span className="font-bold text-zinc-200">{new Date(member.joinDate).toLocaleDateString('en-IN')}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block">वैधता समाप्ति:</span>
+                  <span className="font-bold text-red-400">{expiryDate.toLocaleDateString('en-IN')}</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block">प्लान अवधि:</span>
+                  <span className="font-bold text-zinc-200">{member.planDuration} Month(s)</span>
+                </div>
+                <div>
+                  <span className="text-zinc-500 block">बैच / शिफ्ट:</span>
+                  <span className="font-bold text-zinc-200">{member.batch || 'Morning'}</span>
+                </div>
+              </div>
+
+              <div className="text-center border-t border-zinc-800/80 pt-2 text-[10px] text-zinc-500 font-semibold">
+                ID: JF-{member.id.slice(-6).toUpperCase()} • Stay Fit, Stay Healthy
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-1">
+              <button
+                onClick={sendWhatsAppIdCard}
+                className="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl text-xs shadow-lg flex items-center justify-center gap-2"
+              >
+                <span>📲</span> <span>WhatsApp पर ID Card भेजें</span>
+              </button>
+              <button
+                onClick={() => window.print()}
+                className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-2.5 rounded-xl text-xs"
+              >
+                🖨️ ID Card प्रिंट करें
+              </button>
+              <button
+                onClick={onClose}
+                className="w-full bg-zinc-900 text-zinc-400 hover:text-white font-bold py-2.5 rounded-xl text-xs"
+              >
+                बंद करें
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
+```
