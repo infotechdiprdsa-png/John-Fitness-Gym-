@@ -1,10 +1,9 @@
-```html
 <!DOCTYPE html>
 <html lang="hi" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>JOHN FITNESS - Owner Admin App</title>
+  <title>JOHN FITNESS - Official Owner App</title>
   
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -24,21 +23,36 @@
       -ms-user-select: none !important;
       user-select: none !important;
       -webkit-touch-callout: none !important;
+      -webkit-tap-highlight-color: transparent;
     }
     input, textarea, select {
       -webkit-user-select: text !important;
       user-select: text !important;
     }
     body {
-      background-color: #070707;
+      background-color: #050505;
       color: #ffffff;
-      font-family: system-ui, -apple-system, sans-serif;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       overflow-x: hidden;
+      margin: 0;
+      padding: 0;
+    }
+    /* Custom Scrollbar */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #09090b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #dc2626;
+      border-radius: 9999px;
     }
     @media print {
       body * { visibility: hidden; }
       #printable-receipt, #printable-receipt * { visibility: visible; }
-      #printable-receipt { position: absolute; left: 0; top: 0; width: 100%; background: white !important; color: black !important; }
+      #printable-receipt { position: absolute; left: 0; top: 0; width: 100%; background: white !important; color: black !important; box-shadow: none !important; }
     }
   </style>
 </head>
@@ -63,7 +77,7 @@
           img.src = event.target.result;
           img.onload = () => {
             const canvas = document.createElement('canvas');
-            const MAX_SIZE = 320;
+            const MAX_SIZE = 340;
             let width = img.width;
             let height = img.height;
             if (width > height) {
@@ -75,12 +89,32 @@
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', 0.72));
+            resolve(canvas.toDataURL('image/jpeg', 0.75));
           };
           img.onerror = (err) => reject(err);
         };
         reader.onerror = (err) => reject(err);
       });
+    };
+
+    // --- HELPER: EXPIRY & DAYS CALCULATION ---
+    const getMembershipTiming = (joinDate, durationMonths) => {
+      if (!joinDate || !durationMonths) {
+        return { expiryDate: new Date(), daysLeft: 30, isActive: true, isExpiringSoon: false };
+      }
+      const expiry = new Date(joinDate);
+      expiry.setMonth(expiry.getMonth() + parseInt(durationMonths || 1));
+      expiry.setHours(23, 59, 59, 999);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const diffTime = expiry.getTime() - today.getTime();
+      const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      const isActive = daysLeft >= 0;
+      const isExpiringSoon = isActive && daysLeft <= 7;
+
+      return { expiryDate: expiry, daysLeft, isActive, isExpiringSoon };
     };
 
     // --- HELPER: FINANCIAL CALCULATIONS ---
@@ -107,8 +141,7 @@
     // --- WHATSAPP HELPERS ---
     const sendWhatsAppReceipt = (member) => {
       const fin = getMemberFinancials(member);
-      const expiry = new Date(member.joinDate);
-      expiry.setMonth(expiry.getMonth() + parseInt(member.planDuration || 1));
+      const { expiryDate } = getMembershipTiming(member.joinDate, member.planDuration);
       const lastPay = fin.payments[fin.payments.length - 1];
       const cleanPhone = (member.phone || '').replace(/\D/g, '').slice(-10);
 
@@ -116,8 +149,9 @@
         `----------------------------------\n` +
         `👤 *नाम:* ${member.name}\n` +
         `📞 *मोबाइल:* ${member.phone}\n` +
+        (member.batch ? `⏰ *शिफ्ट/बैच:* ${member.batch}\n` : '') +
         `📅 *ज्वाइनिंग:* ${new Date(member.joinDate).toLocaleDateString('en-IN')}\n` +
-        `⏳ *प्लान:* ${member.planDuration} Month(s) (वैधता: ${expiry.toLocaleDateString('en-IN')})\n` +
+        `⏳ *प्लान:* ${member.planDuration} Month(s) (वैधता: ${expiryDate.toLocaleDateString('en-IN')})\n` +
         `----------------------------------\n` +
         `💰 *कुल तय फीस:* ₹${fin.totalAgreed.toLocaleString()}\n` +
         `✅ *कुल जमा फीस:* ₹${fin.paidAmount.toLocaleString()}\n` +
@@ -146,13 +180,33 @@
       window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
     };
 
-    function CustomLogoBanner({ loggedInPhone, onLogout, onExport, onImport }) {
+    const sendWhatsAppRenewalAlert = (member) => {
+      const { expiryDate, daysLeft } = getMembershipTiming(member.joinDate, member.planDuration);
+      const cleanPhone = (member.phone || '').replace(/\D/g, '').slice(-10);
+
+      const statusText = daysLeft < 0 
+        ? `आपकी जिम मेंबरशिप *${expiryDate.toLocaleDateString('en-IN')}* को समाप्त (Expire) हो चुकी है।`
+        : `आपकी जिम मेंबरशिप अगले *${daysLeft} दिन* में (${expiryDate.toLocaleDateString('en-IN')} को) समाप्त होने वाली है।`;
+
+      const msg = `*🏋️ JOHN FITNESS - मेंबरशिप रिन्यूअल अपडेट 🏋️*\n\n` +
+        `नमस्ते *${member.name}* जी,\n` +
+        `${statusText}\n\n` +
+        `अपनी फिटनेस यात्रा बिना रुके जारी रखने के लिए कृपया जिम आकर अपना प्लान रिन्यू (Renew) कराएं।\n\n` +
+        `*स्वस्थ रहें, फिट रहें!* 💪\n` +
+        `*JOHN FITNESS*`;
+
+      window.open(`https://wa.me/91${cleanPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+
+    // --- TOP FULL-WIDTH LOGO BANNER ---
+    function CustomLogoBanner({ onLogout, onExport, onImport }) {
       const fileRef = useRef(null);
       return (
-        <div className="w-full bg-gradient-to-b from-white via-zinc-50 to-zinc-200 border-b-4 border-red-600 px-3 py-2 sm:px-6 sm:py-3 shadow-md">
+        <div className="w-full bg-gradient-to-r from-white via-zinc-100 to-white border-b-4 border-red-600 px-3 py-2.5 sm:px-6 sm:py-3 shadow-lg">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-3 sm:gap-5 select-none">
-              <svg viewBox="0 0 155 110" className="w-16 h-12 sm:w-24 sm:h-16 shrink-0 drop-shadow-sm">
+            {/* Left-to-Right Signboard Logo */}
+            <div className="flex items-center gap-2.5 sm:gap-4 select-none">
+              <svg viewBox="0 0 155 110" className="w-14 h-10 sm:w-20 sm:h-14 shrink-0 drop-shadow">
                 <rect x="4" y="34" width="12" height="42" rx="2" fill="#18181B" />
                 <rect x="20" y="23" width="15" height="64" rx="2" fill="#18181B" />
                 <rect x="35" y="47" width="88" height="16" fill="#18181B" />
@@ -160,26 +214,38 @@
                 <path d="M 88 10 H 146 V 26 H 108 V 47 H 136 V 63 H 108 V 102 H 88 Z" fill="#DC2626" stroke="#18181B" strokeWidth="2.5" />
               </svg>
               <div className="flex flex-col justify-center">
-                <span className="text-zinc-900 font-black text-2xl sm:text-4xl md:text-5xl tracking-tight leading-none" style={{ fontFamily: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif' }}>
+                <span className="text-zinc-900 font-black text-2xl sm:text-4xl tracking-tight leading-none" style={{ fontFamily: 'Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif' }}>
                   JOHN
                 </span>
-                <span className="text-zinc-900 font-extrabold text-sm sm:text-xl md:text-2xl tracking-[0.18em] leading-none mt-1">
+                <span className="text-zinc-900 font-extrabold text-xs sm:text-lg tracking-[0.2em] leading-none mt-0.5">
                   FITNESS
                 </span>
               </div>
             </div>
 
+            {/* Clean Backup, Restore & Logout Buttons (Without Phone Suffix) */}
             {onLogout && (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 <input ref={fileRef} type="file" accept=".json" onChange={onImport} className="hidden" />
-                <button onClick={onExport} className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold px-2.5 py-2 rounded-lg" title="डेटा बैकअप डाउनलोड करें">
-                  ⬇️ Backup
+                <button 
+                  onClick={onExport} 
+                  className="bg-zinc-900 hover:bg-zinc-800 text-white text-[11px] sm:text-xs font-bold px-2.5 py-2 rounded-xl shadow transition-all active:scale-95 flex items-center gap-1"
+                  title="डेटा बैकअप फाइल डाउनलोड करें"
+                >
+                  <span>⬇️</span> <span>Backup</span>
                 </button>
-                <button onClick={() => fileRef.current?.click()} className="bg-zinc-800 hover:bg-zinc-700 text-white text-xs font-bold px-2.5 py-2 rounded-lg" title="बैकअप फाइल अपलोड करें">
-                  ⬆️ Restore
+                <button 
+                  onClick={() => fileRef.current?.click()} 
+                  className="bg-zinc-900 hover:bg-zinc-800 text-white text-[11px] sm:text-xs font-bold px-2.5 py-2 rounded-xl shadow transition-all active:scale-95 flex items-center gap-1"
+                  title="पुरानी बैकअप फाइल रिस्टोर करें"
+                >
+                  <span>⬆️</span> <span>Restore</span>
                 </button>
-                <button onClick={onLogout} className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-lg shadow">
-                  Logout ({loggedInPhone.slice(-4)})
+                <button 
+                  onClick={onLogout} 
+                  className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-extrabold text-[11px] sm:text-xs px-3.5 py-2 rounded-xl shadow-md transition-all active:scale-95 flex items-center gap-1"
+                >
+                  <span>🔒</span> <span>Log out</span>
                 </button>
               </div>
             )}
@@ -191,10 +257,20 @@
     function MemberAvatar({ member, size = "md", onClick }) {
       const sizes = { sm: "w-10 h-10 text-sm", md: "w-12 h-12 text-base", lg: "w-16 h-16 text-xl" };
       if (member.photo) {
-        return <img src={member.photo} alt={member.name} onClick={onClick} className={`${sizes[size]} rounded-full object-cover border-2 border-red-500 shadow cursor-pointer shrink-0 bg-zinc-800`} />;
+        return (
+          <img 
+            src={member.photo} 
+            alt={member.name} 
+            onClick={onClick} 
+            className={`${sizes[size]} rounded-full object-cover border-2 border-red-500 shadow-md cursor-pointer shrink-0 bg-zinc-800 hover:scale-105 transition-transform`} 
+          />
+        );
       }
       return (
-        <div onClick={onClick} className={`${sizes[size]} rounded-full bg-zinc-800 border border-zinc-700 flex items-center justify-center font-black text-red-500 shrink-0`}>
+        <div 
+          onClick={onClick} 
+          className={`${sizes[size]} rounded-full bg-gradient-to-br from-zinc-800 to-zinc-900 border border-zinc-700 flex items-center justify-center font-black text-red-500 shrink-0 shadow-inner`}
+        >
           {member.name ? member.name.charAt(0).toUpperCase() : 'M'}
         </div>
       );
@@ -221,19 +297,23 @@
 
       // Modals
       const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+      const [editingMember, setEditingMember] = useState(null); // Edit existing member modal state
       const [selectedMemberForPayment, setSelectedMemberForPayment] = useState(null);
       const [receiptMember, setReceiptMember] = useState(null);
       const [previewPhoto, setPreviewPhoto] = useState(null);
       const [confirmDialog, setConfirmDialog] = useState(null);
+
+      // Search & Filters
       const [searchTerm, setSearchTerm] = useState('');
-      const [paymentFilter, setPaymentFilter] = useState('All');
+      const [statusFilter, setStatusFilter] = useState('All'); // All | Active | Expiring | Expired
+      const [paymentFilter, setPaymentFilter] = useState('All'); // All | Pending | Paid
 
       // Save to LocalStorage whenever members change
       useEffect(() => {
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(members));
         } catch (e) {
-          showToast("स्टोरेज फुल हो रहा है, कृपया पुरानी फोटो हटाएं या बैकअप लें।", "error");
+          showToast("स्टोरेज फुल हो रहा है, कृपया बैकअप डाउनलोड करें।", "error");
         }
       }, [members]);
 
@@ -260,17 +340,24 @@
             localStorage.setItem('jf_owner_phone', cleanPhone);
             showToast("John Fitness Admin में आपका स्वागत है!");
           } else {
-            setLoginError('गलत OTP! कृपया सही डेमो OTP दर्ज करें।');
+            setLoginError('गलत OTP! कृपया सही फिक्स OTP दर्ज करें।');
           }
         }
       };
 
       const handleLogout = () => {
-        setIsLoggedIn(false);
-        setLoginStep('phone');
-        setPhoneNumber('');
-        setOtpInput('');
-        localStorage.removeItem('jf_owner_logged');
+        setConfirmDialog({
+          title: "लॉगआउट (Log out) करें?",
+          message: "क्या आप एडमिन पैनल से लॉगआउट करना चाहते हैं? आपका सारा डेटा सुरक्षित रहेगा।",
+          confirmText: "हाँ, Log out करें",
+          onConfirm: () => {
+            setIsLoggedIn(false);
+            setLoginStep('phone');
+            setPhoneNumber('');
+            setOtpInput('');
+            localStorage.removeItem('jf_owner_logged');
+          }
+        });
       };
 
       const handleExportBackup = () => {
@@ -281,7 +368,7 @@
         document.body.appendChild(dlAnchor);
         dlAnchor.click();
         dlAnchor.remove();
-        showToast("बैकअप फाइल डाउनलोड हो गई!");
+        showToast("बैकअप फाइल सफलतापूर्वक डाउनलोड हो गई!");
       };
 
       const handleImportBackup = (e) => {
@@ -293,7 +380,7 @@
             const imported = JSON.parse(ev.target.result);
             if (Array.isArray(imported)) {
               setMembers(imported);
-              showToast(`${imported.length} मेंबर्स का डेटा सफलतापूर्वक रिस्टोर हो गया!`);
+              showToast(`${imported.length} मेंबर्स का डेटा रिस्टोर हो गया!`);
             }
           } catch (err) {
             showToast("अमान्य बैकअप फाइल!", "error");
@@ -302,45 +389,44 @@
         reader.readAsText(file);
       };
 
-      const isMemberActive = (joinDate, durationMonths) => {
-        if (!joinDate || !durationMonths) return true;
-        const expiry = new Date(joinDate);
-        expiry.setMonth(expiry.getMonth() + parseInt(durationMonths));
-        const today = new Date();
-        today.setHours(0,0,0,0);
-        expiry.setHours(0,0,0,0);
-        return expiry >= today;
-      };
-
+      // --- LOGIN SCREEN ---
       if (!isLoggedIn) {
         return (
-          <div className="min-h-screen bg-[#070707] flex flex-col justify-between p-4">
-            <div className="w-full max-w-5xl mx-auto">
+          <div className="min-h-screen bg-[#050505] flex flex-col justify-between p-4 relative overflow-hidden">
+            <div className="absolute -top-24 -left-24 w-96 h-96 bg-red-600/15 blur-[130px] rounded-full pointer-events-none"></div>
+            <div className="absolute -bottom-24 -right-24 w-96 h-96 bg-red-800/15 blur-[130px] rounded-full pointer-events-none"></div>
+
+            <div className="w-full max-w-5xl mx-auto z-10">
               <CustomLogoBanner />
             </div>
-            <div className="flex-1 flex items-center justify-center my-6">
-              <div className="bg-zinc-950 border border-zinc-800 p-6 sm:p-8 rounded-3xl w-full max-w-md shadow-2xl">
-                <h2 className="text-2xl font-black text-white text-center mb-1">OWNER LOGIN</h2>
-                <p className="text-zinc-400 text-center text-sm mb-6">
-                  {loginStep === 'phone' ? 'अपना रजिस्टर्ड ओनर मोबाइल नंबर डालें' : `मोबाइल ${phoneNumber} के लिए 6-अंकों का डेमो OTP डालें`}
+
+            <div className="flex-1 flex items-center justify-center my-6 z-10">
+              <div className="bg-zinc-950/90 backdrop-blur-xl border border-zinc-800/90 p-6 sm:p-8 rounded-3xl w-full max-w-md shadow-[0_0_60px_rgba(220,38,38,0.12)]">
+                <div className="w-14 h-14 bg-red-600/15 border border-red-500/30 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl shadow-inner">
+                  🔐
+                </div>
+                <h2 className="text-2xl font-black text-white text-center tracking-wide">OWNER ADMIN LOGIN</h2>
+                <p className="text-zinc-400 text-center text-xs sm:text-sm mt-1 mb-6">
+                  {loginStep === 'phone' ? 'जिम का हिसाब-किताब खोलने के लिए ओनर मोबाइल नंबर डालें' : `मोबाइल ${phoneNumber} के लिए 6-अंकों का सुरक्षा पिन (OTP) डालें`}
                 </p>
+
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
                   {loginStep === 'phone' ? (
                     <div>
-                      <label className="text-xs font-bold uppercase text-zinc-400">मोबाइल नंबर (Mobile Number)</label>
+                      <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">मोबाइल नंबर (Owner Mobile)</label>
                       <input 
                         type="tel"
                         value={phoneNumber}
                         onChange={e => setPhoneNumber(e.target.value.replace(/\D/g, ''))}
-                        placeholder="9461627473 / 9660169104"
+                        placeholder="Enter 10-digit mobile number"
                         maxLength={10}
                         required
-                        className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5 text-white font-bold focus:outline-none focus:border-red-500"
+                        className="w-full mt-1.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5 text-white font-bold text-base focus:outline-none focus:border-red-500 transition-colors"
                       />
                     </div>
                   ) : (
                     <div>
-                      <label className="text-xs font-bold uppercase text-zinc-400">डेमो OTP (Fixed Demo OTP)</label>
+                      <label className="text-xs font-bold uppercase tracking-wider text-zinc-400">सुरक्षा OTP (Security PIN)</label>
                       <input 
                         type="password"
                         inputMode="numeric"
@@ -350,29 +436,45 @@
                         maxLength={6}
                         required
                         autoFocus
-                        className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5 text-white tracking-[0.5em] font-black text-center text-xl focus:outline-none focus:border-red-500"
+                        className="w-full mt-1.5 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3.5 text-white tracking-[0.5em] font-black text-center text-xl focus:outline-none focus:border-red-500 transition-colors"
                       />
                     </div>
                   )}
-                  {loginError && <div className="bg-red-950/60 border border-red-800 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold">{loginError}</div>}
-                  <button type="submit" className="w-full bg-red-600 hover:bg-red-500 text-white font-bold py-3.5 rounded-xl shadow-lg">
-                    {loginStep === 'phone' ? 'आगे बढ़ें (Next)' : 'लॉगिन करें (Verify & Login)'}
+
+                  {loginError && (
+                    <div className="bg-red-950/70 border border-red-800 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold text-center">
+                      ⚠️ {loginError}
+                    </div>
+                  )}
+
+                  <button 
+                    type="submit" 
+                    className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-black py-3.5 rounded-xl shadow-[0_4px_20px_rgba(220,38,38,0.35)] transition-all active:scale-[0.98]"
+                  >
+                    {loginStep === 'phone' ? 'आगे बढ़ें (Continue) →' : 'अनलॉक करें (Verify & Login)'}
                   </button>
+
                   {loginStep === 'otp' && (
-                    <button type="button" onClick={() => { setLoginStep('phone'); setOtpInput(''); setLoginError(''); }} className="w-full text-zinc-400 text-xs hover:text-white py-1">
+                    <button 
+                      type="button" 
+                      onClick={() => { setLoginStep('phone'); setOtpInput(''); setLoginError(''); }} 
+                      className="w-full text-zinc-400 text-xs hover:text-white py-1 font-semibold"
+                    >
                       ← मोबाइल नंबर बदलें
                     </button>
                   )}
                 </form>
               </div>
             </div>
-            <div className="text-center text-zinc-600 text-xs">🔒 Copy Protection Enabled • John Fitness Official App</div>
+            <div className="text-center text-zinc-600 text-xs z-10">🛡️ Strict Copy Protection • John Fitness Official Management</div>
           </div>
         );
       }
 
-      // Compute Dashboard Totals
+      // --- CALCULATE DASHBOARD METRICS ---
       let totalRevenue = 0, totalPending = 0, cashTotal = 0, onlineTotal = 0;
+      let activeCount = 0, expiringSoonCount = 0, expiredCount = 0;
+
       members.forEach(m => {
         const fin = getMemberFinancials(m);
         totalRevenue += fin.paidAmount;
@@ -381,230 +483,484 @@
           if (p.mode === 'Online') onlineTotal += (Number(p.amount) || 0);
           else cashTotal += (Number(p.amount) || 0);
         });
+
+        const timing = getMembershipTiming(m.joinDate, m.planDuration);
+        if (timing.isActive) {
+          activeCount++;
+          if (timing.isExpiringSoon) expiringSoonCount++;
+        } else {
+          expiredCount++;
+        }
       });
 
-      const filteredMembers = members.filter(m => 
-        (m.name && m.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (m.phone && m.phone.includes(searchTerm))
-      );
+      // Filter Members List
+      const filteredMembers = members.filter(m => {
+        const matchesSearch = (m.name && m.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+                              (m.phone && m.phone.includes(searchTerm));
+        if (!matchesSearch) return false;
+
+        const fin = getMemberFinancials(m);
+        const timing = getMembershipTiming(m.joinDate, m.planDuration);
+
+        if (activeTab === 'payments') {
+          if (paymentFilter === 'Pending') return fin.pendingAmount > 0;
+          if (paymentFilter === 'Paid') return fin.pendingAmount === 0 && fin.totalAgreed > 0;
+          return true;
+        }
+
+        if (statusFilter === 'Active') return timing.isActive;
+        if (statusFilter === 'Expiring') return timing.isExpiringSoon;
+        if (statusFilter === 'Expired') return !timing.isActive;
+        return true;
+      });
 
       return (
-        <div className="min-h-screen bg-[#070707] text-white flex flex-col">
+        <div className="min-h-screen bg-[#050505] text-white flex flex-col">
+          {/* Toast Notification */}
           {toast && (
-            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[200] w-[90%] max-w-md bg-zinc-900 border border-zinc-700 text-white px-5 py-3.5 rounded-2xl shadow-2xl font-bold text-sm text-center">
-              {toast.message}
+            <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[250] w-[92%] max-w-md bg-zinc-900/95 backdrop-blur-md border border-zinc-700 text-white px-5 py-3.5 rounded-2xl shadow-2xl font-bold text-sm text-center">
+              {toast.type === 'error' ? '⚠️ ' : '✅ '}{toast.message}
             </div>
           )}
 
+          {/* Sticky Top Header */}
           <header className="sticky top-0 z-40">
             <CustomLogoBanner 
-              loggedInPhone={loggedInPhone} 
               onLogout={handleLogout} 
               onExport={handleExportBackup}
               onImport={handleImportBackup}
             />
           </header>
 
-          {/* Navigation Tabs */}
-          <div className="bg-zinc-950 border-b border-zinc-800 px-4 py-2.5 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex gap-2 overflow-x-auto">
-              {[
-                { id: 'dashboard', label: '📊 डैशबोर्ड' },
-                { id: 'members', label: '🏋️ सभी मेंबर्स' },
-                { id: 'payments', label: '💰 फीस, रसीद और बकाया' }
-              ].map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setActiveTab(t.id)}
-                  className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm whitespace-nowrap transition-all ${
-                    activeTab === t.id ? 'bg-red-600 text-white shadow' : 'bg-zinc-900 text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
+          {/* Navigation & Action Bar */}
+          <div className="bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-3 sm:px-6 py-3">
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex gap-1.5 sm:gap-2 overflow-x-auto pb-1 sm:pb-0">
+                {[
+                  { id: 'dashboard', label: '📊 डैशबोर्ड' },
+                  { id: 'members', label: `🏋️ मेंबर्स (${members.length})` },
+                  { id: 'payments', label: '💰 फीस और बकाया' }
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setActiveTab(t.id)}
+                    className={`px-3.5 py-2 rounded-xl font-extrabold text-xs sm:text-sm whitespace-nowrap transition-all ${
+                      activeTab === t.id 
+                        ? 'bg-gradient-to-r from-red-600 to-red-700 text-white shadow-[0_4px_15px_rgba(220,38,38,0.3)]' 
+                        : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+                    }`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
 
-            <button 
-              onClick={() => setIsAddModalOpen(true)}
-              className="bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white px-4 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-lg"
-            >
-              + नया एडमिशन (Add Member)
-            </button>
+              <button 
+                onClick={() => setIsAddModalOpen(true)}
+                className="w-full sm:w-auto bg-gradient-to-r from-red-600 via-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-[0_4px_20px_rgba(220,38,38,0.4)] transition-all active:scale-95 flex items-center justify-center gap-1.5"
+              >
+                <span className="text-base leading-none">+</span>
+                <span>नया एडमिशन (Add Member)</span>
+              </button>
+            </div>
           </div>
 
-          {/* Main Content */}
-          <main className="flex-1 p-4 max-w-7xl w-full mx-auto space-y-6 pb-20">
+          {/* Main Dashboard & Content Area */}
+          <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto space-y-5 pb-24">
             {activeTab === 'dashboard' && (
-              <>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                  <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                {/* Total Members Card */}
+                <div 
+                  onClick={() => { setActiveTab('members'); setStatusFilter('All'); }}
+                  className="bg-gradient-to-br from-zinc-900/90 to-zinc-950 border border-zinc-800 hover:border-zinc-700 p-4 rounded-2xl shadow-lg cursor-pointer transition-all"
+                >
+                  <div className="flex justify-between items-start">
                     <p className="text-zinc-400 text-xs font-bold">कुल मेंबर्स (Total)</p>
-                    <p className="text-2xl sm:text-3xl font-black text-white mt-1">{members.length}</p>
-                    <p className="text-xs text-green-400 font-bold mt-2">
-                      {members.filter(m => isMemberActive(m.joinDate, m.planDuration)).length} Active
-                    </p>
+                    <span className="text-lg">👥</span>
                   </div>
-                  <div className="bg-zinc-950 border border-green-500/30 p-4 rounded-2xl">
-                    <p className="text-zinc-400 text-xs font-bold">कुल प्राप्त फीस (Received)</p>
-                    <p className="text-2xl sm:text-3xl font-black text-green-400 mt-1">₹{totalRevenue.toLocaleString()}</p>
-                    <p className="text-[11px] text-zinc-400 mt-2">नकद + ऑनलाइन</p>
-                  </div>
-                  <div onClick={() => { setActiveTab('payments'); setPaymentFilter('Pending'); }} className="bg-zinc-950 border border-orange-500/30 p-4 rounded-2xl cursor-pointer">
-                    <p className="text-zinc-400 text-xs font-bold">कुल बकाया (Pending Due)</p>
-                    <p className="text-2xl sm:text-3xl font-black text-orange-400 mt-1">₹{totalPending.toLocaleString()}</p>
-                    <p className="text-[11px] text-orange-300 mt-2 underline">बकाया लिस्ट देखें →</p>
-                  </div>
-                  <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl">
-                    <p className="text-zinc-400 text-xs font-bold">पेमेंट मोड (Cash / UPI)</p>
-                    <p className="text-xs sm:text-sm font-bold text-emerald-400 mt-2">💵 Cash: ₹{cashTotal.toLocaleString()}</p>
-                    <p className="text-xs sm:text-sm font-bold text-blue-400 mt-1">📱 UPI: ₹{onlineTotal.toLocaleString()}</p>
+                  <p className="text-2xl sm:text-3xl font-black text-white mt-1.5">{members.length}</p>
+                  <div className="flex flex-wrap gap-2 mt-2 text-[11px] font-bold">
+                    <span className="text-green-400">● {activeCount} Active</span>
+                    {expiredCount > 0 && <span className="text-red-400">● {expiredCount} Expired</span>}
                   </div>
                 </div>
-              </>
+
+                {/* Total Collected Revenue */}
+                <div className="bg-gradient-to-br from-green-950/30 to-zinc-950 border border-green-500/30 p-4 rounded-2xl shadow-lg">
+                  <div className="flex justify-between items-start">
+                    <p className="text-zinc-300 text-xs font-bold">कुल प्राप्त फीस (Received)</p>
+                    <span className="text-lg">💰</span>
+                  </div>
+                  <p className="text-2xl sm:text-3xl font-black text-green-400 mt-1.5">₹{totalRevenue.toLocaleString()}</p>
+                  <p className="text-[11px] text-zinc-400 font-semibold mt-2">नकद + ऑनलाइन कुल जमा</p>
+                </div>
+
+                {/* Pending Dues Card */}
+                <div 
+                  onClick={() => { setActiveTab('payments'); setPaymentFilter('Pending'); }} 
+                  className="bg-gradient-to-br from-orange-950/30 to-zinc-950 border border-orange-500/30 hover:border-orange-500/60 p-4 rounded-2xl shadow-lg cursor-pointer transition-all"
+                >
+                  <div className="flex justify-between items-start">
+                    <p className="text-zinc-300 text-xs font-bold">कुल बकाया (Pending Due)</p>
+                    <span className="text-lg">⏳</span>
+                  </div>
+                  <p className="text-2xl sm:text-3xl font-black text-orange-400 mt-1.5">₹{totalPending.toLocaleString()}</p>
+                  <p className="text-[11px] text-orange-300 font-bold mt-2 underline">बकाया लिस्ट देखें →</p>
+                </div>
+
+                {/* Cash vs UPI Breakdown */}
+                <div className="bg-gradient-to-br from-zinc-900/90 to-zinc-950 border border-zinc-800 p-4 rounded-2xl shadow-lg">
+                  <div className="flex justify-between items-start">
+                    <p className="text-zinc-400 text-xs font-bold">पेमेंट मोड (Cash / UPI)</p>
+                    <span className="text-lg">🏦</span>
+                  </div>
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs sm:text-sm font-extrabold text-emerald-400">💵 Cash: ₹{cashTotal.toLocaleString()}</p>
+                    <p className="text-xs sm:text-sm font-extrabold text-blue-400">📱 UPI: ₹{onlineTotal.toLocaleString()}</p>
+                  </div>
+                </div>
+              </div>
             )}
 
-            {/* Search & Filter Controls */}
-            <div className="bg-zinc-950 border border-zinc-800 p-3.5 rounded-2xl flex flex-col sm:flex-row gap-3 justify-between items-center">
-              <input 
-                type="text"
-                placeholder="🔍 नाम या मोबाइल नंबर से मेंबर खोजें..."
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                className="w-full sm:w-96 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-red-500"
-              />
-              {activeTab === 'payments' && (
+            {/* Expiring Soon / Expired Quick Alert Banner */}
+            {(expiringSoonCount > 0 || expiredCount > 0) && activeTab !== 'payments' && (
+              <div className="bg-gradient-to-r from-zinc-900 via-zinc-950 to-zinc-900 border border-zinc-800 rounded-2xl p-3.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 text-xs sm:text-sm">
+                  <span className="text-xl">🔔</span>
+                  <div>
+                    <span className="font-bold text-white">मेंबरशिप वैधता अपडेट: </span>
+                    {expiringSoonCount > 0 && <span className="text-amber-400 font-bold mr-2">{expiringSoonCount} मेंबर का प्लान 7 दिन में खत्म होगा।</span>}
+                    {expiredCount > 0 && <span className="text-red-400 font-bold">{expiredCount} मेंबर का प्लान समाप्त (Expired) हो चुका है।</span>}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {expiringSoonCount > 0 && (
+                    <button onClick={() => setStatusFilter('Expiring')} className="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-3 py-1.5 rounded-xl text-xs font-bold">
+                      Expiring ({expiringSoonCount})
+                    </button>
+                  )}
+                  {expiredCount > 0 && (
+                    <button onClick={() => setStatusFilter('Expired')} className="bg-red-500/20 text-red-300 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs font-bold">
+                      Expired ({expiredCount})
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Search & Smart Filter Bar */}
+            <div className="bg-zinc-950 border border-zinc-800/90 p-3.5 rounded-2xl flex flex-col sm:flex-row gap-3 justify-between items-center shadow-md">
+              <div className="relative w-full sm:w-96">
+                <input 
+                  type="text"
+                  placeholder="🔍 नाम या मोबाइल नंबर से मेंबर खोजें..."
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl pl-4 pr-9 py-2.5 text-sm text-white focus:outline-none focus:border-red-500"
+                />
+                {searchTerm && (
+                  <button onClick={() => setSearchTerm('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white text-xs">✕</button>
+                )}
+              </div>
+
+              {activeTab === 'payments' ? (
                 <div className="flex gap-1.5 w-full sm:w-auto">
-                  {['All', 'Pending', 'Paid'].map(f => (
+                  {[
+                    { id: 'All', label: 'सभी (All)' },
+                    { id: 'Pending', label: 'बाकी फीस (Due)' },
+                    { id: 'Paid', label: 'पूरी जमा (Paid)' }
+                  ].map(f => (
                     <button
-                      key={f}
-                      onClick={() => setPaymentFilter(f)}
-                      className={`flex-1 sm:flex-initial px-3 py-2 rounded-lg text-xs font-bold ${
-                        paymentFilter === f ? 'bg-red-600 text-white' : 'bg-zinc-900 text-zinc-400'
+                      key={f.id}
+                      onClick={() => setPaymentFilter(f.id)}
+                      className={`flex-1 sm:flex-initial px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                        paymentFilter === f.id ? 'bg-red-600 text-white shadow' : 'bg-zinc-900 text-zinc-400 hover:text-white'
                       }`}
                     >
-                      {f === 'All' ? 'सभी' : f === 'Pending' ? 'बाकी (Due)' : 'जमा (Paid)'}
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex gap-1.5 w-full sm:w-auto overflow-x-auto">
+                  {[
+                    { id: 'All', label: 'सभी' },
+                    { id: 'Active', label: 'Active' },
+                    { id: 'Expiring', label: 'जल्द खत्म (7d)' },
+                    { id: 'Expired', label: 'Expired' }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => setStatusFilter(f.id)}
+                      className={`flex-1 sm:flex-initial px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all ${
+                        statusFilter === f.id ? 'bg-red-600 text-white shadow' : 'bg-zinc-900 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {f.label}
                     </button>
                   ))}
                 </div>
               )}
             </div>
 
-            {/* Members / Payments List */}
-            <div className="bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden shadow-xl">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse min-w-[820px]">
-                  <thead>
-                    <tr className="bg-zinc-900/80 text-zinc-400 text-xs uppercase border-b border-zinc-800">
-                      <th className="p-3.5 font-bold">कैंडिडेट (Member)</th>
-                      <th className="p-3.5 font-bold">प्लान और वैधता</th>
-                      <th className="p-3.5 font-bold">तय फीस</th>
-                      <th className="p-3.5 font-bold">जमा (Paid)</th>
-                      <th className="p-3.5 font-bold">बाकी (Due)</th>
-                      <th className="p-3.5 font-bold text-right">रसीद / WhatsApp / किश्त</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800/60 text-sm">
-                    {filteredMembers
-                      .filter(m => {
-                        if (activeTab !== 'payments' || paymentFilter === 'All') return true;
-                        const fin = getMemberFinancials(m);
-                        return paymentFilter === 'Pending' ? fin.pendingAmount > 0 : fin.pendingAmount === 0;
-                      })
-                      .map(member => {
-                        const fin = getMemberFinancials(member);
-                        const expiry = new Date(member.joinDate);
-                        expiry.setMonth(expiry.getMonth() + parseInt(member.planDuration || 1));
-                        return (
-                          <tr key={member.id} className="hover:bg-zinc-900/40">
-                            <td className="p-3.5">
-                              <div className="flex items-center gap-3">
-                                <MemberAvatar 
-                                  member={member} 
-                                  onClick={() => member.photo && setPreviewPhoto({ url: member.photo, name: member.name, phone: member.phone })}
-                                />
-                                <div>
-                                  <p className="font-bold text-white">{member.name}</p>
-                                  <p className="text-xs text-zinc-400">📞 {member.phone}</p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="p-3.5">
-                              <span className="bg-zinc-800 text-zinc-200 text-xs font-bold px-2 py-0.5 rounded">{member.planDuration}M Plan</span>
-                              <p className="text-xs text-zinc-400 mt-1">खत्म: {expiry.toLocaleDateString('en-IN')}</p>
-                            </td>
-                            <td className="p-3.5 font-bold text-white">₹{fin.totalAgreed.toLocaleString()}</td>
-                            <td className="p-3.5 font-bold text-green-400">
-                              ₹{fin.paidAmount.toLocaleString()}
-                              <p className="text-[11px] text-zinc-500 font-normal">{fin.payments.length} किश्त</p>
-                            </td>
-                            <td className="p-3.5">
-                              {fin.pendingAmount > 0 ? (
-                                <span className="bg-orange-500/15 text-orange-400 border border-orange-500/30 px-2.5 py-1 rounded-lg text-xs font-black">
-                                  ₹{fin.pendingAmount.toLocaleString()} बाकी
-                                </span>
-                              ) : (
-                                <span className="bg-green-500/15 text-green-400 border border-green-500/30 px-2.5 py-1 rounded-lg text-xs font-bold">
-                                  Clear
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3.5 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  onClick={() => setSelectedMemberForPayment(member)}
-                                  className="bg-zinc-800 hover:bg-red-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
-                                >
-                                  💰 किश्त/हिसाब
-                                </button>
-                                <button
-                                  onClick={() => setReceiptMember(member)}
-                                  className="bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
-                                  title="रसीद देखें और WhatsApp पर भेजें"
-                                >
-                                  🧾 रसीद
-                                </button>
-                                {fin.pendingAmount > 0 && (
-                                  <button
-                                    onClick={() => sendWhatsAppDueAlert(member)}
-                                    className="bg-green-600/20 hover:bg-green-600 text-green-300 hover:text-white border border-green-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
-                                    title="WhatsApp पर बकाया फीस का अलर्ट भेजें"
-                                  >
-                                    📲 बकाया अलर्ट
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => setConfirmDialog({
-                                    title: "मेंबर हटाएं?",
-                                    message: `क्या आप ${member.name} का रिकॉर्ड हटाना चाहते हैं?`,
-                                    onConfirm: () => {
-                                      setMembers(prev => prev.filter(m => m.id !== member.id));
-                                      showToast("रिकॉर्ड हटा दिया गया।");
-                                    }
-                                  })}
-                                  className="text-zinc-500 hover:text-red-500 px-2 py-1.5"
-                                >
-                                  🗑️
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    {filteredMembers.length === 0 && (
-                      <tr>
-                        <td colSpan="6" className="p-12 text-center text-zinc-500">कोई रिकॉर्ड नहीं मिला। ऊपर "+ नया एडमिशन" पर क्लिक करें।</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+            {/* Responsive Members List: Mobile Cards + Desktop Table */}
+            {filteredMembers.length === 0 ? (
+              <div className="bg-zinc-950 border border-zinc-800/80 rounded-3xl p-12 text-center space-y-3">
+                <div className="text-4xl">🏋️‍♂️</div>
+                <p className="text-zinc-300 font-bold text-base">कोई मेंबर रिकॉर्ड नहीं मिला</p>
+                <p className="text-zinc-500 text-xs">नया मेंबर जोड़ने के लिए ऊपर "+ नया एडमिशन" बटन पर क्लिक करें।</p>
               </div>
-            </div>
+            ) : (
+              <>
+                {/* MOBILE & TABLET PREMIUM CARDS VIEW */}
+                <div className="grid grid-cols-1 md:hidden gap-3.5">
+                  {filteredMembers.map(member => {
+                    const fin = getMemberFinancials(member);
+                    const { expiryDate, daysLeft, isActive, isExpiringSoon } = getMembershipTiming(member.joinDate, member.planDuration);
+
+                    return (
+                      <div key={member.id} className="bg-gradient-to-b from-zinc-900/90 to-zinc-950 border border-zinc-800/90 rounded-2xl p-4 shadow-xl space-y-3.5">
+                        {/* Card Top Row: Avatar, Name, Phone, Status Badge */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <MemberAvatar 
+                              member={member} 
+                              size="md"
+                              onClick={() => member.photo && setPreviewPhoto({ url: member.photo, name: member.name, phone: member.phone })}
+                            />
+                            <div>
+                              <h4 className="font-black text-white text-base leading-tight">{member.name}</h4>
+                              <p className="text-xs text-zinc-400 font-semibold mt-0.5">📞 {member.phone}</p>
+                              <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                <span className="bg-zinc-800 text-zinc-200 text-[10px] font-bold px-2 py-0.5 rounded">
+                                  {member.planDuration}M Plan
+                                </span>
+                                {member.batch && (
+                                  <span className="bg-zinc-800/80 text-zinc-300 text-[10px] font-semibold px-2 py-0.5 rounded">
+                                    ⏰ {member.batch}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Expiry Status Pill */}
+                          <div className="text-right shrink-0">
+                            <span className={`inline-block px-2.5 py-1 rounded-full text-[10px] font-black border ${
+                              !isActive 
+                                ? 'bg-red-500/15 text-red-400 border-red-500/30' 
+                                : isExpiringSoon 
+                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                : 'bg-green-500/15 text-green-400 border-green-500/30'
+                            }`}>
+                              {!isActive ? 'Expired' : isExpiringSoon ? `${daysLeft}d बचे` : 'Active'}
+                            </span>
+                            <p className="text-[10px] text-zinc-500 mt-1">
+                              वैधता: {expiryDate.toLocaleDateString('en-IN')}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Financial Summary Bar */}
+                        <div className="grid grid-cols-3 gap-2 bg-zinc-950/90 border border-zinc-800/80 p-2.5 rounded-xl text-center">
+                          <div>
+                            <p className="text-[10px] text-zinc-500 font-bold">तय फीस</p>
+                            <p className="text-sm font-black text-white">₹{fin.totalAgreed.toLocaleString()}</p>
+                          </div>
+                          <div className="border-x border-zinc-800">
+                            <p className="text-[10px] text-zinc-500 font-bold">जमा ({fin.payments.length})</p>
+                            <p className="text-sm font-black text-green-400">₹{fin.paidAmount.toLocaleString()}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-zinc-500 font-bold">बाकी (Due)</p>
+                            <p className={`text-sm font-black ${fin.pendingAmount > 0 ? 'text-orange-400' : 'text-zinc-400'}`}>
+                              {fin.pendingAmount > 0 ? `₹${fin.pendingAmount.toLocaleString()}` : 'Clear'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons Row */}
+                        <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                          <button
+                            onClick={() => setSelectedMemberForPayment(member)}
+                            className="flex-1 bg-red-600 hover:bg-red-500 text-white py-2 px-2.5 rounded-xl text-xs font-extrabold text-center shadow transition-colors"
+                          >
+                            💰 किश्त / खाता
+                          </button>
+                          <button
+                            onClick={() => setReceiptMember(member)}
+                            className="bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
+                          >
+                            🧾 रसीद
+                          </button>
+                          <button
+                            onClick={() => setEditingMember(member)}
+                            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
+                            title="मेंबर की जानकारी एडिट करें"
+                          >
+                            ✏️ एडिट
+                          </button>
+                          {fin.pendingAmount > 0 && (
+                            <button
+                              onClick={() => sendWhatsAppDueAlert(member)}
+                              className="bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/30 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
+                            >
+                              📲 बकाया अलर्ट
+                            </button>
+                          )}
+                          {(!isActive || isExpiringSoon) && (
+                            <button
+                              onClick={() => sendWhatsAppRenewalAlert(member)}
+                              className="bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-black border border-amber-500/30 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
+                            >
+                              🔄 रिन्यू अलर्ट
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setConfirmDialog({
+                              title: "मेंबर रिकॉर्ड हटाएं?",
+                              message: `क्या आप वाकई ${member.name} का रिकॉर्ड हटाना चाहते हैं?`,
+                              confirmText: "हाँ, हटाएं",
+                              onConfirm: () => {
+                                setMembers(prev => prev.filter(m => m.id !== member.id));
+                                showToast(`${member.name} का रिकॉर्ड हटा दिया गया।`);
+                              }
+                            })}
+                            className="bg-zinc-900 hover:bg-red-950 text-zinc-400 hover:text-red-400 py-2 px-2.5 rounded-xl text-xs"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* DESKTOP FULL TABLE VIEW */}
+                <div className="hidden md:block bg-zinc-950 border border-zinc-800 rounded-2xl overflow-hidden shadow-2xl">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-zinc-900/90 text-zinc-400 text-xs uppercase border-b border-zinc-800">
+                          <th className="p-4 font-bold">कैंडिडेट (Member)</th>
+                          <th className="p-4 font-bold">प्लान और वैधता</th>
+                          <th className="p-4 font-bold">तय फीस</th>
+                          <th className="p-4 font-bold">जमा (Paid)</th>
+                          <th className="p-4 font-bold">बाकी (Due)</th>
+                          <th className="p-4 font-bold text-right">एक्शन (Edit / किश्त / रसीद / WhatsApp)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-800/60 text-sm">
+                        {filteredMembers.map(member => {
+                          const fin = getMemberFinancials(member);
+                          const { expiryDate, daysLeft, isActive, isExpiringSoon } = getMembershipTiming(member.joinDate, member.planDuration);
+                          return (
+                            <tr key={member.id} className="hover:bg-zinc-900/40 transition-colors">
+                              <td className="p-4">
+                                <div className="flex items-center gap-3">
+                                  <MemberAvatar 
+                                    member={member} 
+                                    onClick={() => member.photo && setPreviewPhoto({ url: member.photo, name: member.name, phone: member.phone })}
+                                  />
+                                  <div>
+                                    <p className="font-bold text-white text-base">{member.name}</p>
+                                    <p className="text-xs text-zinc-400">📞 {member.phone} {member.batch ? `• ⏰ ${member.batch}` : ''}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="p-4">
+                                <div className="flex items-center gap-2">
+                                  <span className="bg-zinc-800 text-zinc-200 text-xs font-bold px-2 py-0.5 rounded">{member.planDuration}M Plan</span>
+                                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold border ${
+                                    !isActive 
+                                      ? 'bg-red-500/15 text-red-400 border-red-500/30' 
+                                      : isExpiringSoon 
+                                      ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                      : 'bg-green-500/15 text-green-400 border-green-500/30'
+                                  }`}>
+                                    {!isActive ? 'Expired' : isExpiringSoon ? `${daysLeft}d Left` : 'Active'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-zinc-400 mt-1">
+                                  शुरू: {new Date(member.joinDate).toLocaleDateString('en-IN')} → खत्म: {expiryDate.toLocaleDateString('en-IN')}
+                                </p>
+                              </td>
+                              <td className="p-4 font-black text-white">₹{fin.totalAgreed.toLocaleString()}</td>
+                              <td className="p-4 font-bold text-green-400">
+                                ₹{fin.paidAmount.toLocaleString()}
+                                <p className="text-[11px] text-zinc-500 font-normal">{fin.payments.length} किश्त</p>
+                              </td>
+                              <td className="p-4">
+                                {fin.pendingAmount > 0 ? (
+                                  <span className="bg-orange-500/15 text-orange-400 border border-orange-500/30 px-2.5 py-1 rounded-lg text-xs font-black">
+                                    ₹{fin.pendingAmount.toLocaleString()} बाकी
+                                  </span>
+                                ) : (
+                                  <span className="bg-green-500/15 text-green-400 border border-green-500/30 px-2.5 py-1 rounded-lg text-xs font-bold">
+                                    Clear
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-4 text-right">
+                                <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                  <button
+                                    onClick={() => setSelectedMemberForPayment(member)}
+                                    className="bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                                  >
+                                    💰 किश्त/हिसाब
+                                  </button>
+                                  <button
+                                    onClick={() => setReceiptMember(member)}
+                                    className="bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white border border-blue-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                                  >
+                                    🧾 रसीद
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingMember(member)}
+                                    className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                                    title="मेंबर की पूरी जानकारी एडिट करें"
+                                  >
+                                    ✏️ एडिट
+                                  </button>
+                                  {fin.pendingAmount > 0 && (
+                                    <button
+                                      onClick={() => sendWhatsAppDueAlert(member)}
+                                      className="bg-green-600/20 hover:bg-green-600 text-green-300 hover:text-white border border-green-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                                    >
+                                      📲 बकाया अलर्ट
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => setConfirmDialog({
+                                      title: "मेंबर हटाएं?",
+                                      message: `क्या आप ${member.name} का रिकॉर्ड हटाना चाहते हैं?`,
+                                      confirmText: "हाँ, हटाएं",
+                                      onConfirm: () => {
+                                        setMembers(prev => prev.filter(m => m.id !== member.id));
+                                        showToast("रिकॉर्ड हटा दिया गया।");
+                                      }
+                                    })}
+                                    className="text-zinc-500 hover:text-red-500 px-2 py-1.5"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
+            )}
           </main>
 
           {/* Add Member Modal */}
           {isAddModalOpen && (
-            <AddMemberModal 
+            <MemberFormModal 
+              mode="add"
               onClose={() => setIsAddModalOpen(false)}
               onSave={(newMember) => {
                 setMembers(prev => [newMember, ...prev]);
@@ -615,7 +971,22 @@
             />
           )}
 
-          {/* Installment Modal */}
+          {/* Edit Member Modal (पूरी जानकारी एडिट करने के लिए) */}
+          {editingMember && (
+            <MemberFormModal 
+              mode="edit"
+              initialMember={editingMember}
+              onClose={() => setEditingMember(null)}
+              onSave={(updatedMember) => {
+                setMembers(prev => prev.map(m => m.id === updatedMember.id ? updatedMember : m));
+                showToast(`${updatedMember.name} की जानकारी अपडेट हो गई!`);
+                setEditingMember(null);
+              }}
+              showToast={showToast}
+            />
+          )}
+
+          {/* Installment & Ledger Modal */}
           {selectedMemberForPayment && (
             <InstallmentModal 
               member={members.find(m => m.id === selectedMemberForPayment.id) || selectedMemberForPayment}
@@ -628,38 +999,45 @@
                 setSelectedMemberForPayment(null);
                 setReceiptMember(m);
               }}
+              onEditProfile={(m) => {
+                setSelectedMemberForPayment(null);
+                setEditingMember(m);
+              }}
               showToast={showToast}
             />
           )}
 
-          {/* Receipt Modal */}
+          {/* Official Receipt Modal */}
           {receiptMember && (
             <ReceiptModal 
-              member={receiptMember}
+              member={members.find(m => m.id === receiptMember.id) || receiptMember}
               onClose={() => setReceiptMember(null)}
             />
           )}
 
-          {/* Photo Preview */}
+          {/* Full Photo Preview */}
           {previewPhoto && (
-            <div className="fixed inset-0 z-[190] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewPhoto(null)}>
+            <div className="fixed inset-0 z-[210] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewPhoto(null)}>
               <div className="bg-zinc-900 border border-zinc-700 rounded-3xl p-3 max-w-sm w-full text-center" onClick={e => e.stopPropagation()}>
                 <img src={previewPhoto.url} alt={previewPhoto.name} className="w-full max-h-[70vh] object-contain rounded-2xl" />
-                <p className="font-bold text-white mt-2">{previewPhoto.name}</p>
-                <button onClick={() => setPreviewPhoto(null)} className="mt-2 bg-red-600 text-white px-4 py-1.5 rounded-xl text-xs font-bold">बंद करें</button>
+                <p className="font-bold text-white mt-2.5">{previewPhoto.name}</p>
+                {previewPhoto.phone && <p className="text-xs text-zinc-400">{previewPhoto.phone}</p>}
+                <button onClick={() => setPreviewPhoto(null)} className="mt-3 bg-red-600 text-white px-5 py-2 rounded-xl text-xs font-bold">बंद करें</button>
               </div>
             </div>
           )}
 
           {/* Confirm Dialog */}
           {confirmDialog && (
-            <div className="fixed inset-0 z-[195] bg-black/80 flex items-center justify-center p-4">
-              <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-6 max-w-sm w-full">
-                <h3 className="text-lg font-bold text-white">{confirmDialog.title}</h3>
-                <p className="text-zinc-400 text-sm mt-1">{confirmDialog.message}</p>
-                <div className="flex justify-end gap-2 mt-5">
-                  <button onClick={() => setConfirmDialog(null)} className="px-4 py-2 rounded-lg bg-zinc-800 text-zinc-300 text-xs font-bold">रद्द करें</button>
-                  <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="px-4 py-2 rounded-lg bg-red-600 text-white text-xs font-bold">हाँ, हटाएं</button>
+            <div className="fixed inset-0 z-[220] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+              <div className="bg-zinc-950 border border-zinc-800 rounded-3xl p-6 max-w-sm w-full shadow-2xl">
+                <h3 className="text-lg font-black text-white">{confirmDialog.title}</h3>
+                <p className="text-zinc-400 text-sm mt-1.5">{confirmDialog.message}</p>
+                <div className="flex justify-end gap-2.5 mt-6">
+                  <button onClick={() => setConfirmDialog(null)} className="px-4 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-bold">रद्द करें</button>
+                  <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold">
+                    {confirmDialog.confirmText || 'हाँ, हटाएं'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -668,18 +1046,25 @@
       );
     }
 
-    function AddMemberModal({ onClose, onSave, showToast }) {
-      const [photoPreview, setPhotoPreview] = useState('');
+    // --- UNIFIED ADD & EDIT MEMBER MODAL ---
+    function MemberFormModal({ mode = 'add', initialMember = null, onClose, onSave, showToast }) {
+      const isEdit = mode === 'edit' && initialMember;
+      const fin = isEdit ? getMemberFinancials(initialMember) : null;
+
+      const [photoPreview, setPhotoPreview] = useState(isEdit ? (initialMember.photo || '') : '');
       const camRef = useRef(null);
       const galRef = useRef(null);
+
       const [formData, setFormData] = useState({
-        name: '',
-        phone: '',
-        planDuration: '1',
-        joinDate: new Date().toISOString().split('T')[0],
-        totalFee: '',
+        name: isEdit ? (initialMember.name || '') : '',
+        phone: isEdit ? (initialMember.phone || '') : '',
+        batch: isEdit ? (initialMember.batch || 'Morning (सुबह)') : 'Morning (सुबह)',
+        planDuration: isEdit ? String(initialMember.planDuration || '1') : '1',
+        joinDate: isEdit ? (initialMember.joinDate || new Date().toISOString().split('T')[0]) : new Date().toISOString().split('T')[0],
+        totalFee: isEdit ? String(fin.totalAgreed || '') : '',
         initialPaid: '',
-        paymentMode: 'Cash'
+        paymentMode: isEdit ? (initialMember.paymentMode || 'Cash') : 'Cash',
+        notes: isEdit ? (initialMember.notes || '') : ''
       });
 
       const handlePhoto = async (e) => {
@@ -694,60 +1079,108 @@
       };
 
       const agreed = Number(formData.totalFee) || 0;
-      const paid = Number(formData.initialPaid) || 0;
-      const pending = Math.max(0, agreed - paid);
+      const alreadyPaid = isEdit ? fin.paidAmount : (Number(formData.initialPaid) || 0);
+      const pending = Math.max(0, agreed - alreadyPaid);
 
       const handleSubmit = (e) => {
         e.preventDefault();
-        if (paid > agreed) {
+        if (!isEdit && alreadyPaid > agreed) {
           showToast("जमा फीस कुल तय फीस से ज्यादा नहीं हो सकती!", "error");
           return;
         }
-        const payments = paid > 0 ? [{
-          id: Date.now().toString(),
-          amount: paid,
-          date: formData.joinDate,
-          mode: formData.paymentMode,
-          note: 'एडमिशन के समय जमा'
-        }] : [];
 
-        onSave({
-          id: 'jf_' + Date.now(),
-          name: formData.name.trim(),
-          phone: formData.phone.trim(),
-          planDuration: formData.planDuration,
-          joinDate: formData.joinDate,
-          photo: photoPreview || null,
-          totalFee: agreed,
-          paidAmount: paid,
-          pendingAmount: pending,
-          feeStatus: pending === 0 && agreed > 0 ? 'Paid' : 'Pending',
-          paymentMode: formData.paymentMode,
-          payments,
-          createdAt: new Date().toISOString()
-        });
+        if (isEdit) {
+          // Update existing member while preserving all payment history
+          const existingPayments = fin.payments;
+          const updatedPending = Math.max(0, agreed - fin.paidAmount);
+          onSave({
+            ...initialMember,
+            name: formData.name.trim(),
+            phone: formData.phone.trim(),
+            batch: formData.batch,
+            planDuration: formData.planDuration,
+            joinDate: formData.joinDate,
+            photo: photoPreview || null,
+            totalFee: agreed,
+            feeAmount: agreed,
+            paidAmount: fin.paidAmount,
+            pendingAmount: updatedPending,
+            feeStatus: updatedPending === 0 && agreed > 0 ? 'Paid' : 'Pending',
+            notes: formData.notes.trim(),
+            payments: existingPayments
+          });
+        } else {
+          // Create new member
+          const paidNow = Number(formData.initialPaid) || 0;
+          const payments = paidNow > 0 ? [{
+            id: Date.now().toString(),
+            amount: paidNow,
+            date: formData.joinDate,
+            mode: formData.paymentMode,
+            note: 'एडमिशन के समय जमा'
+          }] : [];
+
+          onSave({
+            id: 'jf_' + Date.now(),
+            name: formData.name.trim(),
+            phone: formData.phone.trim(),
+            batch: formData.batch,
+            planDuration: formData.planDuration,
+            joinDate: formData.joinDate,
+            photo: photoPreview || null,
+            totalFee: agreed,
+            feeAmount: agreed,
+            paidAmount: paidNow,
+            pendingAmount: Math.max(0, agreed - paidNow),
+            feeStatus: Math.max(0, agreed - paidNow) === 0 && agreed > 0 ? 'Paid' : 'Pending',
+            paymentMode: formData.paymentMode,
+            notes: formData.notes.trim(),
+            payments,
+            createdAt: new Date().toISOString()
+          });
+        }
       };
 
       return (
-        <div className="fixed inset-0 z-[150] bg-black/85 flex items-center justify-center p-3 overflow-y-auto">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-lg w-full p-5 space-y-4 my-auto">
+        <div className="fixed inset-0 z-[180] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-lg w-full p-5 space-y-4 my-auto max-h-[94vh] overflow-y-auto shadow-2xl">
             <div className="flex justify-between items-center border-b border-zinc-800 pb-3">
-              <h3 className="text-xl font-black text-white">नया एडमिशन (New Member)</h3>
-              <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg font-bold">✕</button>
+              <div>
+                <h3 className="text-xl font-black text-white">
+                  {isEdit ? '✏️ मेंबर प्रोफाइल एडिट करें' : '🏋️ नया एडमिशन (New Member)'}
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  {isEdit ? 'नाम, मोबाइल, फोटो, प्लान या तय फीस में बदलाव करें' : 'कैंडिडेट की फोटो और प्लान की जानकारी भरें'}
+                </p>
+              </div>
+              <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg font-bold bg-zinc-900 w-8 h-8 rounded-full">✕</button>
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="bg-zinc-900/60 border border-zinc-800 p-3 rounded-2xl flex items-center gap-4">
+              {/* Photo Capture / Edit Box */}
+              <div className="bg-zinc-900/60 border border-zinc-800 p-3.5 rounded-2xl flex items-center gap-4">
                 {photoPreview ? (
-                  <img src={photoPreview} className="w-20 h-20 rounded-2xl object-cover border-2 border-red-500" />
+                  <div className="relative shrink-0">
+                    <img src={photoPreview} className="w-20 h-20 rounded-2xl object-cover border-2 border-red-500" />
+                    <button 
+                      type="button" 
+                      onClick={() => setPhotoPreview('')} 
+                      className="absolute -top-2 -right-2 bg-red-600 text-white w-6 h-6 rounded-full text-xs font-bold shadow"
+                    >
+                      ✕
+                    </button>
+                  </div>
                 ) : (
-                  <div className="w-20 h-20 rounded-2xl bg-zinc-950 border border-dashed border-zinc-700 flex items-center justify-center text-xs text-zinc-500">No Photo</div>
+                  <div className="w-20 h-20 rounded-2xl bg-zinc-950 border border-dashed border-zinc-700 flex flex-col items-center justify-center text-xs text-zinc-500 shrink-0">
+                    <span className="text-lg">📷</span>
+                    <span className="text-[10px] font-bold">No Photo</span>
+                  </div>
                 )}
                 <div className="space-y-2">
-                  <p className="text-xs font-bold text-zinc-300">कैंडिडेट की फोटो</p>
+                  <p className="text-xs font-bold text-zinc-200">कैंडिडेट की फोटो {isEdit ? 'बदलें' : 'लगाएं'}</p>
                   <input ref={camRef} type="file" accept="image/*" capture="environment" onChange={handlePhoto} className="hidden" />
                   <input ref={galRef} type="file" accept="image/*" onChange={handlePhoto} className="hidden" />
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button type="button" onClick={() => camRef.current?.click()} className="bg-red-600/20 text-red-400 border border-red-500/30 px-3 py-1.5 rounded-xl text-xs font-bold">📷 कैमरा</button>
                     <button type="button" onClick={() => galRef.current?.click()} className="bg-zinc-800 text-zinc-200 px-3 py-1.5 rounded-xl text-xs font-bold">🖼️ गैलरी</button>
                   </div>
@@ -756,52 +1189,132 @@
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-2">
-                  <label className="text-xs font-bold text-zinc-400">पूरा नाम *</label>
-                  <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white" placeholder="राहुल शर्मा" />
+                  <label className="text-xs font-bold text-zinc-400">पूरा नाम (Full Name) *</label>
+                  <input 
+                    type="text" 
+                    required 
+                    value={formData.name} 
+                    onChange={e => setFormData({...formData, name: e.target.value})} 
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white font-bold focus:outline-none focus:border-red-500" 
+                    placeholder="जैसे: दिलखुश सैनी" 
+                  />
                 </div>
+
                 <div>
                   <label className="text-xs font-bold text-zinc-400">मोबाइल नंबर (WhatsApp) *</label>
-                  <input type="tel" required maxLength="10" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value.replace(/\D/g, '')})} className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white" placeholder="10 अंकों का नंबर" />
+                  <input 
+                    type="tel" 
+                    required 
+                    maxLength="10" 
+                    value={formData.phone} 
+                    onChange={e => setFormData({...formData, phone: e.target.value.replace(/\D/g, '')})} 
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white font-bold focus:outline-none focus:border-red-500" 
+                    placeholder="10 अंकों का नंबर" 
+                  />
                 </div>
+
                 <div>
-                  <label className="text-xs font-bold text-zinc-400">ज्वाइनिंग तारीख *</label>
-                  <input type="date" required value={formData.joinDate} onChange={e => setFormData({...formData, joinDate: e.target.value})} className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white [color-scheme:dark]" />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-zinc-400">प्लान (महीने) *</label>
-                  <select value={formData.planDuration} onChange={e => setFormData({...formData, planDuration: e.target.value})} className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white">
-                    <option value="1">1 महीना</option>
-                    <option value="2">2 महीने</option>
-                    <option value="3">3 महीने</option>
-                    <option value="6">6 महीने</option>
-                    <option value="12">12 महीने (1 साल)</option>
+                  <label className="text-xs font-bold text-zinc-400">जिम टाइम / बैच (Batch)</label>
+                  <select 
+                    value={formData.batch} 
+                    onChange={e => setFormData({...formData, batch: e.target.value})} 
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-red-500"
+                  >
+                    <option value="Morning (सुबह)">🌅 Morning (सुबह)</option>
+                    <option value="Evening (शाम)">🌆 Evening (शाम)</option>
+                    <option value="Anytime (दोनों समय)">⚡ Anytime</option>
                   </select>
                 </div>
+
                 <div>
-                  <label className="text-xs font-bold text-zinc-400">तय फीस (Total Agreed ₹) *</label>
-                  <input type="number" required min="0" value={formData.totalFee} onChange={e => setFormData({...formData, totalFee: e.target.value, initialPaid: formData.initialPaid === formData.totalFee ? e.target.value : formData.initialPaid})} className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white font-bold" placeholder="1500" />
+                  <label className="text-xs font-bold text-zinc-400">ज्वाइनिंग तारीख (Join Date) *</label>
+                  <input 
+                    type="date" 
+                    required 
+                    value={formData.joinDate} 
+                    onChange={e => setFormData({...formData, joinDate: e.target.value})} 
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white [color-scheme:dark] focus:outline-none focus:border-red-500" 
+                  />
                 </div>
+
                 <div>
-                  <label className="text-xs font-bold text-green-400">आज जमा (Paid Now ₹)</label>
-                  <input type="number" min="0" max={agreed} value={formData.initialPaid} onChange={e => setFormData({...formData, initialPaid: e.target.value})} className="w-full mt-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-green-400 font-bold" placeholder="0" />
+                  <label className="text-xs font-bold text-zinc-400">प्लान अवधि (Duration) *</label>
+                  <select 
+                    value={formData.planDuration} 
+                    onChange={e => setFormData({...formData, planDuration: e.target.value})} 
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white focus:outline-none focus:border-red-500"
+                  >
+                    <option value="1">1 महीना (1 Month)</option>
+                    <option value="2">2 महीने (2 Months)</option>
+                    <option value="3">3 महीने (3 Months)</option>
+                    <option value="6">6 महीने (6 Months)</option>
+                    <option value="12">12 महीने (1 Year)</option>
+                  </select>
                 </div>
-                <div>
-                  <label className="text-xs font-bold text-zinc-400">पेमेंट मोड</label>
-                  <div className="grid grid-cols-2 gap-2 mt-1">
-                    <button type="button" onClick={() => setFormData({...formData, paymentMode: 'Cash'})} className={`py-2.5 rounded-xl text-xs font-bold border ${formData.paymentMode === 'Cash' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}>💵 Cash</button>
-                    <button type="button" onClick={() => setFormData({...formData, paymentMode: 'Online'})} className={`py-2.5 rounded-xl text-xs font-bold border ${formData.paymentMode === 'Online' ? 'bg-blue-500/20 border-blue-500 text-blue-300' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}>📱 UPI</button>
-                  </div>
+
+                <div className={isEdit ? "sm:col-span-2" : ""}>
+                  <label className="text-xs font-bold text-zinc-400">कुल तय फीस (Total Agreed Fee ₹) *</label>
+                  <input 
+                    type="number" 
+                    required 
+                    min="0" 
+                    value={formData.totalFee} 
+                    onChange={e => setFormData({
+                      ...formData, 
+                      totalFee: e.target.value, 
+                      initialPaid: (!isEdit && formData.initialPaid === formData.totalFee) ? e.target.value : formData.initialPaid
+                    })} 
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-white font-black focus:outline-none focus:border-red-500" 
+                    placeholder="जैसे: 2100" 
+                  />
+                </div>
+
+                {!isEdit && (
+                  <>
+                    <div>
+                      <label className="text-xs font-bold text-green-400">आज जमा राशि (Paid Now ₹)</label>
+                      <input 
+                        type="number" 
+                        min="0" 
+                        max={agreed} 
+                        value={formData.initialPaid} 
+                        onChange={e => setFormData({...formData, initialPaid: e.target.value})} 
+                        className="w-full mt-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3.5 py-2.5 text-green-400 font-black focus:outline-none focus:border-green-500" 
+                        placeholder="0" 
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="text-xs font-bold text-zinc-400">पेमेंट मोड (Payment Mode)</label>
+                      <div className="grid grid-cols-2 gap-2.5 mt-1">
+                        <button type="button" onClick={() => setFormData({...formData, paymentMode: 'Cash'})} className={`py-2.5 rounded-xl text-xs font-bold border ${formData.paymentMode === 'Cash' ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}>💵 नकद (Cash)</button>
+                        <button type="button" onClick={() => setFormData({...formData, paymentMode: 'Online'})} className={`py-2.5 rounded-xl text-xs font-bold border ${formData.paymentMode === 'Online' ? 'bg-blue-500/20 border-blue-500 text-blue-300' : 'bg-zinc-900 border-zinc-800 text-zinc-400'}`}>📱 ऑनलाइन (UPI)</button>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="sm:col-span-2">
+                  <label className="text-xs font-bold text-zinc-400">नोट्स / पता (Optional Note)</label>
+                  <input 
+                    type="text" 
+                    value={formData.notes} 
+                    onChange={e => setFormData({...formData, notes: e.target.value})} 
+                    className="w-full mt-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-red-500" 
+                    placeholder="कोई विशेष जानकारी या पता..." 
+                  />
                 </div>
               </div>
 
-              <div className="flex justify-between items-center bg-zinc-900 px-4 py-2.5 rounded-xl text-xs">
-                <span className="text-zinc-400">बाकी बकाया (Pending Balance):</span>
+              <div className="flex justify-between items-center bg-zinc-900 px-4 py-3 rounded-xl text-xs border border-zinc-800">
+                <span className="text-zinc-400">बाकी बकाया (Balance Due):</span>
                 <strong className="text-orange-400 text-sm">₹{pending.toLocaleString()}</strong>
               </div>
 
-              <div className="flex justify-end gap-2 pt-2">
+              <div className="flex justify-end gap-2.5 pt-2">
                 <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl bg-zinc-800 text-zinc-300 text-xs font-bold">रद्द करें</button>
-                <button type="submit" className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-lg">सेव करें</button>
+                <button type="submit" className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white text-xs font-black shadow-lg">
+                  {isEdit ? 'बदलाव सेव करें (Update)' : 'एडमिशन सेव करें (Save)'}
+                </button>
               </div>
             </form>
           </div>
@@ -809,12 +1322,29 @@
       );
     }
 
-    function InstallmentModal({ member, onClose, onUpdateMember, onOpenReceipt, showToast }) {
+    // --- INSTALLMENT & EDITABLE PAYMENT HISTORY MODAL ---
+    function InstallmentModal({ member, onClose, onUpdateMember, onOpenReceipt, onEditProfile, showToast }) {
       const fin = getMemberFinancials(member);
       const [amount, setAmount] = useState(fin.pendingAmount > 0 ? String(fin.pendingAmount) : '');
       const [mode, setMode] = useState('Cash');
       const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
       const [note, setNote] = useState('');
+
+      // Inline editing for any past payment installment
+      const [editingPaymentId, setEditingPaymentId] = useState(null);
+      const [editPayForm, setEditPayForm] = useState({ amount: '', date: '', mode: 'Cash', note: '' });
+
+      const syncMemberPayments = (updatedPayments) => {
+        const newPaid = updatedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+        const newPending = Math.max(0, fin.totalAgreed - newPaid);
+        onUpdateMember({
+          ...member,
+          payments: updatedPayments,
+          paidAmount: newPaid,
+          pendingAmount: newPending,
+          feeStatus: newPending === 0 && fin.totalAgreed > 0 ? 'Paid' : 'Pending'
+        });
+      };
 
       const handleAdd = (e) => {
         e.preventDefault();
@@ -822,30 +1352,60 @@
         if (!val || val <= 0) return;
         const newPay = { id: Date.now().toString(), amount: val, date, mode, note: note.trim() || 'किश्त जमा' };
         const updatedPayments = [...fin.payments, newPay];
-        const newPaid = updatedPayments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-        const newPending = Math.max(0, fin.totalAgreed - newPaid);
-
-        onUpdateMember({
-          ...member,
-          payments: updatedPayments,
-          paidAmount: newPaid,
-          pendingAmount: newPending,
-          feeStatus: newPending === 0 ? 'Paid' : 'Pending'
-        });
-        showToast(`₹${val} किश्त जोड़ दी गई!`);
+        syncMemberPayments(updatedPayments);
+        showToast(`₹${val} की किश्त जोड़ दी गई!`);
         setAmount('');
         setNote('');
       };
 
+      const startEditPayment = (p) => {
+        setEditingPaymentId(p.id);
+        setEditPayForm({
+          amount: String(p.amount),
+          date: p.date,
+          mode: p.mode || 'Cash',
+          note: p.note || ''
+        });
+      };
+
+      const saveEditedPayment = (id) => {
+        const val = Number(editPayForm.amount);
+        if (!val || val <= 0) return;
+        const updated = fin.payments.map(p => p.id === id ? {
+          ...p,
+          amount: val,
+          date: editPayForm.date,
+          mode: editPayForm.mode,
+          note: editPayForm.note
+        } : p);
+        syncMemberPayments(updated);
+        setEditingPaymentId(null);
+        showToast("किश्त अपडेट कर दी गई!");
+      };
+
+      const deletePayment = (id) => {
+        const updated = fin.payments.filter(p => p.id !== id);
+        syncMemberPayments(updated);
+        showToast("किश्त हटा दी गई।");
+      };
+
       return (
-        <div className="fixed inset-0 z-[160] bg-black/85 flex items-center justify-center p-3 overflow-y-auto">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-xl w-full p-5 space-y-5 my-auto max-h-[92vh] overflow-y-auto">
+        <div className="fixed inset-0 z-[185] bg-black/85 backdrop-blur-sm flex items-center justify-center p-3 overflow-y-auto">
+          <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-xl w-full p-5 space-y-4 my-auto max-h-[92vh] overflow-y-auto shadow-2xl">
             <div className="flex justify-between items-center border-b border-zinc-800 pb-3">
               <div>
                 <h3 className="text-xl font-black text-white">{member.name} - फीस खाता</h3>
                 <p className="text-xs text-zinc-400">📞 {member.phone} • {member.planDuration}M Plan</p>
               </div>
-              <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg font-bold">✕</button>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => onEditProfile(member)} 
+                  className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-3 py-1.5 rounded-xl text-xs font-bold"
+                >
+                  ✏️ प्रोफाइल एडिट
+                </button>
+                <button onClick={onClose} className="text-zinc-400 hover:text-white text-lg font-bold bg-zinc-900 w-8 h-8 rounded-full">✕</button>
+              </div>
             </div>
 
             <div className="grid grid-cols-3 gap-2.5 text-center">
@@ -865,18 +1425,19 @@
 
             {/* Quick WhatsApp & Receipt Actions */}
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => onOpenReceipt(member)} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 px-3 rounded-xl text-xs font-bold text-center">
-                🧾 पक्की रसीद बनाएं / WhatsApp भेजें
+              <button type="button" onClick={() => onOpenReceipt(member)} className="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2.5 px-3 rounded-xl text-xs font-bold text-center shadow">
+                🧾 पक्की रसीद / WhatsApp शेयर
               </button>
               {fin.pendingAmount > 0 && (
-                <button type="button" onClick={() => sendWhatsAppDueAlert(member)} className="flex-1 bg-green-600 hover:bg-green-500 text-white py-2.5 px-3 rounded-xl text-xs font-bold text-center">
+                <button type="button" onClick={() => sendWhatsAppDueAlert(member)} className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-2.5 px-3 rounded-xl text-xs font-bold text-center shadow">
                   📲 बकाया फीस WhatsApp रिमाइंडर
                 </button>
               )}
             </div>
 
+            {/* Add New Installment */}
             <form onSubmit={handleAdd} className="bg-zinc-900/60 border border-zinc-800 p-4 rounded-2xl space-y-3">
-              <p className="text-xs font-bold text-red-400 uppercase">+ नई किश्त जमा करें</p>
+              <p className="text-xs font-bold text-red-400 uppercase">+ नई किश्त जमा करें (Add Installment)</p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <input type="number" required min="1" value={amount} onChange={e => setAmount(e.target.value)} placeholder="₹ राशि" className="bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-white font-bold text-sm" />
                 <input type="date" required value={date} onChange={e => setDate(e.target.value)} className="bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-white text-sm [color-scheme:dark]" />
@@ -887,21 +1448,50 @@
               </div>
               <div className="flex gap-2">
                 <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="नोट (जैसे: दूसरी किश्त)" className="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white" />
-                <button type="submit" className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-xl text-xs font-bold">+ जमा करें</button>
+                <button type="submit" className="bg-green-600 hover:bg-green-500 text-white px-4 py-2 rounded-xl text-xs font-bold shadow">+ जमा करें</button>
               </div>
             </form>
 
+            {/* Editable Installment History */}
             <div className="space-y-2">
-              <p className="text-xs font-bold text-zinc-400 uppercase">पेमेंट हिस्ट्री ({fin.payments.length})</p>
-              {fin.payments.map((p, i) => (
-                <div key={p.id || i} className="bg-zinc-900 border border-zinc-800 px-3.5 py-2.5 rounded-xl flex justify-between items-center text-xs">
-                  <div>
-                    <span className="font-black text-green-400 text-sm">₹{Number(p.amount).toLocaleString()}</span>
-                    <span className="ml-2 px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-bold">{p.mode}</span>
-                    <p className="text-zinc-400 mt-0.5">{new Date(p.date).toLocaleDateString('en-IN')} • {p.note}</p>
+              <p className="text-xs font-bold text-zinc-400 uppercase">जमा किश्तों की हिस्ट्री ({fin.payments.length}) — एडिट या डिलीट करें</p>
+              {fin.payments.length === 0 ? (
+                <p className="text-xs text-zinc-500 text-center py-4">अभी तक कोई किश्त दर्ज नहीं है।</p>
+              ) : (
+                fin.payments.map((p, i) => (
+                  <div key={p.id || i} className="bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-xs">
+                    {editingPaymentId === p.id ? (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-3 gap-2">
+                          <input type="number" value={editPayForm.amount} onChange={e => setEditPayForm({...editPayForm, amount: e.target.value})} className="bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-white font-bold" />
+                          <input type="date" value={editPayForm.date} onChange={e => setEditPayForm({...editPayForm, date: e.target.value})} className="bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-white [color-scheme:dark]" />
+                          <select value={editPayForm.mode} onChange={e => setEditPayForm({...editPayForm, mode: e.target.value})} className="bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-white">
+                            <option value="Cash">Cash</option>
+                            <option value="Online">Online/UPI</option>
+                          </select>
+                        </div>
+                        <div className="flex gap-2">
+                          <input type="text" value={editPayForm.note} onChange={e => setEditPayForm({...editPayForm, note: e.target.value})} className="flex-1 bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1 text-white" placeholder="नोट" />
+                          <button type="button" onClick={() => saveEditedPayment(p.id)} className="bg-green-600 text-white px-3 py-1 rounded-lg font-bold">सेव</button>
+                          <button type="button" onClick={() => setEditingPaymentId(null)} className="bg-zinc-800 text-zinc-300 px-3 py-1 rounded-lg">रद्द</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <span className="font-black text-green-400 text-sm">₹{Number(p.amount).toLocaleString()}</span>
+                          <span className="ml-2 px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-bold">{p.mode}</span>
+                          <p className="text-zinc-400 mt-0.5">{new Date(p.date).toLocaleDateString('en-IN')} • {p.note}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button onClick={() => startEditPayment(p)} className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2.5 py-1 rounded-lg font-bold">✏️ एडिट</button>
+                          <button onClick={() => deletePayment(p.id)} className="bg-zinc-800 hover:bg-red-900/60 text-red-400 px-2 py-1 rounded-lg">🗑️</button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -910,13 +1500,12 @@
 
     function ReceiptModal({ member, onClose }) {
       const fin = getMemberFinancials(member);
-      const expiry = new Date(member.joinDate);
-      expiry.setMonth(expiry.getMonth() + parseInt(member.planDuration || 1));
+      const { expiryDate } = getMembershipTiming(member.joinDate, member.planDuration);
 
       return (
-        <div className="fixed inset-0 z-[180] bg-black/90 flex items-center justify-center p-3 overflow-y-auto">
+        <div className="fixed inset-0 z-[195] bg-black/90 flex items-center justify-center p-3 overflow-y-auto">
           <div className="bg-zinc-950 border border-zinc-800 rounded-3xl max-w-md w-full p-5 space-y-4 my-auto">
-            <div id="printable-receipt" className="bg-white text-zinc-900 p-5 rounded-2xl border-2 border-red-600 space-y-4">
+            <div id="printable-receipt" className="bg-white text-zinc-900 p-5 rounded-2xl border-t-8 border-red-600 space-y-4 shadow-xl">
               <div className="flex items-center justify-between border-b-2 border-zinc-200 pb-3">
                 <div>
                   <h2 className="text-2xl font-black tracking-tight text-red-600">JOHN FITNESS</h2>
@@ -943,7 +1532,7 @@
                 </div>
                 <div>
                   <p className="text-zinc-500">Valid Till:</p>
-                  <p className="font-bold">{expiry.toLocaleDateString('en-IN')}</p>
+                  <p className="font-bold">{expiryDate.toLocaleDateString('en-IN')}</p>
                 </div>
               </div>
 
@@ -961,7 +1550,7 @@
                 )}
               </div>
 
-              <div className="bg-zinc-900 text-white p-3 rounded-xl space-y-1 text-xs">
+              <div className="bg-zinc-900 text-white p-3.5 rounded-xl space-y-1 text-xs">
                 <div className="flex justify-between">
                   <span>कुल तय फीस (Agreed Fee):</span>
                   <strong>₹{fin.totalAgreed.toLocaleString()}</strong>
@@ -970,7 +1559,7 @@
                   <span>कुल जमा राशि (Total Paid):</span>
                   <strong>₹{fin.paidAmount.toLocaleString()}</strong>
                 </div>
-                <div className="flex justify-between text-orange-400 border-t border-zinc-700 pt-1 text-sm font-black">
+                <div className="flex justify-between text-orange-400 border-t border-zinc-700 pt-1.5 text-sm font-black">
                   <span>बकाया राशि (Balance Due):</span>
                   <span>₹{fin.pendingAmount.toLocaleString()}</span>
                 </div>
