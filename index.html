@@ -12,7 +12,7 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   
-  <!-- Babel for JSX compilation in browser/Acode -->
+  <!-- Babel for JSX compilation -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
@@ -51,13 +51,49 @@
     }
     @media print {
       body * { visibility: hidden; }
-      #printable-receipt, #printable-receipt * { visibility: visible; }
-      #printable-receipt { position: absolute; left: 0; top: 0; width: 100%; background: white !important; color: black !important; box-shadow: none !important; }
+      #printable-receipt, #printable-receipt *, #printable-id-card, #printable-id-card * { visibility: visible; }
+      #printable-receipt, #printable-id-card { position: absolute; left: 0; top: 0; width: 100%; background: white !important; color: black !important; box-shadow: none !important; }
     }
   </style>
 </head>
 <body oncontextmenu="return false;" oncopy="return false;" oncut="return false;">
   <div id="root"></div>
+
+  <!-- Firebase SDK Imports -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.firebaseAppInit = async function() {
+      try {
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'john-fitness-owner-app-v4';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
+          apiKey: "AIzaSyDummyKeyForLocalDevFallback12345",
+          authDomain: "john-fitness.firebaseapp.com",
+          projectId: "john-fitness"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+
+        // AUTH BEFORE QUERIES
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+
+        window.FB = { db, auth, appId, collection, doc, getDoc, setDoc, updateDoc, deleteDoc, onSnapshot, query, getDocs };
+        window.dispatchEvent(new Event('firebase-ready'));
+      } catch (e) {
+        console.error("Firebase init error (Running fallback offline mode):", e);
+        window.dispatchEvent(new Event('firebase-ready'));
+      }
+    };
+    window.firebaseAppInit();
+  </script>
 
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
@@ -65,8 +101,7 @@
     // --- CONSTANTS ---
     const ALLOWED_NUMBERS = ['9461627473', '9660169104'];
     const DEMO_OTP = '159357';
-    const STORAGE_KEY = 'john_fitness_members_v4';
-    const ARCHIVE_STORAGE_KEY = 'john_fitness_deleted_archive_v1';
+    const LOCAL_STORAGE_KEY = 'john_fitness_members_local_v4';
 
     // --- HELPER: IMAGE COMPRESSION ---
     const compressImage = (file) => {
@@ -205,7 +240,6 @@
       return (
         <div className="w-full bg-gradient-to-r from-white via-zinc-100 to-white border-b-4 border-red-600 px-3 py-2.5 sm:px-6 sm:py-3 shadow-lg">
           <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-            {/* Left-to-Right Signboard Logo */}
             <div className="flex items-center gap-2.5 sm:gap-4 select-none">
               <svg viewBox="0 0 155 110" className="w-14 h-10 sm:w-20 sm:h-14 shrink-0 drop-shadow">
                 <rect x="4" y="34" width="12" height="42" rx="2" fill="#18181B" />
@@ -224,7 +258,6 @@
               </div>
             </div>
 
-            {/* Clean Backup, Restore & Logout Buttons */}
             {onLogout && (
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <input ref={fileRef} type="file" accept=".json" onChange={onImport} className="hidden" />
@@ -278,21 +311,9 @@
     }
 
     function App() {
-      const [members, setMembers] = useState(() => {
-        try {
-          const saved = localStorage.getItem(STORAGE_KEY);
-          return saved ? JSON.parse(saved) : [];
-        } catch (e) { return []; }
-      });
-
-      // Permanent Deleted Members Archive History State
-      const [deletedArchive, setDeletedArchive] = useState(() => {
-        try {
-          const saved = localStorage.getItem(ARCHIVE_STORAGE_KEY);
-          return saved ? JSON.parse(saved) : [];
-        } catch (e) { return []; }
-      });
-
+      const [members, setMembers] = useState([]);
+      const [deletedArchive, setDeletedArchive] = useState([]);
+      const [isCloudSynced, setIsCloudSynced] = useState(false);
       const [activeTab, setActiveTab] = useState('dashboard');
       const [toast, setToast] = useState(null);
 
@@ -309,8 +330,9 @@
       const [editingMember, setEditingMember] = useState(null);
       const [selectedMemberForPayment, setSelectedMemberForPayment] = useState(null);
       const [receiptMember, setReceiptMember] = useState(null);
+      const [activeIdCardMember, setActiveIdCardMember] = useState(null);
       const [previewPhoto, setPreviewPhoto] = useState(null);
-      const [deleteTargetMember, setDeleteTargetMember] = useState(null); // Triggers custom delete reason modal
+      const [deleteTargetMember, setDeleteTargetMember] = useState(null);
 
       // Search & Filters
       const [searchTerm, setSearchTerm] = useState('');
@@ -318,27 +340,118 @@
       const [paymentFilter, setPaymentFilter] = useState('All');
       const [archiveSearch, setArchiveSearch] = useState('');
 
-      // Save to LocalStorage whenever members change
+      // --- CLOUD FIREBASE SYNC ON LOAD ---
       useEffect(() => {
-        try {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(members));
-        } catch (e) {
-          showToast("स्टोरेज फुल हो रहा है, कृपया बैकअप डाउनलोड करें।", "error");
-        }
-      }, [members]);
+        const initCloudSync = () => {
+          if (window.FB && window.FB.db) {
+            const { db, appId, collection, onSnapshot, query, getDocs, doc, setDoc } = window.FB;
+            
+            // 1. Members Realtime Sync
+            const membersRef = collection(db, 'artifacts', appId, 'public', 'data', 'members_list');
+            onSnapshot(query(membersRef), (snapshot) => {
+              const cloudMembers = [];
+              snapshot.forEach(docSnap => {
+                cloudMembers.push({ id: docSnap.id, ...docSnap.data() });
+              });
+              if (cloudMembers.length > 0) {
+                setMembers(cloudMembers);
+                setIsCloudSynced(true);
+              } else {
+                // If cloud is empty, check localStorage migration or fallback
+                const localSaved = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (localSaved) {
+                  try {
+                    const parsedLocal = JSON.parse(localSaved);
+                    if (parsedLocal.length > 0) {
+                      setMembers(parsedLocal);
+                      // Migrate to cloud
+                      parsedLocal.forEach(m => {
+                        setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(m.id)), m);
+                      });
+                    }
+                  } catch(e) {}
+                }
+              }
+            }, (err) => {
+              console.error("Cloud sync error, fallback to local:", err);
+              loadLocalFallback();
+            });
 
-      // Save deleted archive permanently
-      useEffect(() => {
-        try {
-          localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(deletedArchive));
-        } catch (e) {
-          console.error("Archive storage error", e);
+            // 2. Deleted Archive Realtime Sync
+            const archiveRef = collection(db, 'artifacts', appId, 'public', 'data', 'deleted_archive');
+            onSnapshot(query(archiveRef), (snapshot) => {
+              const cloudArchive = [];
+              snapshot.forEach(docSnap => {
+                cloudArchive.push({ archiveId: docSnap.id, ...docSnap.data() });
+              });
+              if (cloudArchive.length > 0) {
+                setDeletedArchive(cloudArchive);
+              }
+            }, (err) => {
+              console.error("Archive sync error:", err);
+            });
+          } else {
+            loadLocalFallback();
+          }
+        };
+
+        const loadLocalFallback = () => {
+          try {
+            const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+            if (saved) setMembers(JSON.parse(saved));
+          } catch(e) {}
+        };
+
+        if (window.FB && window.FB.db) {
+          initCloudSync();
+        } else {
+          window.addEventListener('firebase-ready', initCloudSync);
+          return () => window.removeEventListener('firebase-ready', initCloudSync);
         }
-      }, [deletedArchive]);
+      }, []);
 
       const showToast = (message, type = 'success') => {
         setToast({ message, type });
         setTimeout(() => setToast(null), 3500);
+      };
+
+      // --- SAVE / UPDATE MEMBER TO CLOUD & LOCAL ---
+      const saveMemberToCloudAndLocal = async (updatedMembersList, targetMember) => {
+        setMembers(updatedMembersList);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedMembersList));
+
+        if (window.FB && window.FB.db) {
+          try {
+            const { db, appId, doc, setDoc } = window.FB;
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(targetMember.id)), targetMember);
+            setIsCloudSynced(true);
+          } catch (e) {
+            console.error("Cloud save failed:", e);
+            showToast("क्लाउड सेव में समस्या, लोकल सेव सुरक्षित है।", "error");
+          }
+        }
+      };
+
+      // --- DELETE MEMBER & SAVE TO ARCHIVE ---
+      const executeDeleteMember = async (archiveObj, originalId) => {
+        const updated = members.filter(m => m.id !== originalId);
+        setMembers(updated);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+
+        const newArchive = [archiveObj, ...deletedArchive];
+        setDeletedArchive(newArchive);
+
+        if (window.FB && window.FB.db) {
+          try {
+            const { db, appId, doc, setDoc, deleteDoc } = window.FB;
+            // Delete from active members collection
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(originalId)));
+            // Save to archive collection
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deleted_archive', String(archiveObj.archiveId)), archiveObj);
+          } catch (e) {
+            console.error("Archive sync failed:", e);
+          }
+        }
       };
 
       const handleLoginSubmit = (e) => {
@@ -368,7 +481,7 @@
         setDeleteTargetMember({
           isLogoutConfirm: true,
           title: "लॉगआउट (Log out) करें?",
-          message: "क्या आप एडमिन पैनल से लॉगआउट करना चाहते हैं? आपका सारा डेटा सुरक्षित रहेगा।"
+          message: "क्या आप एडमिन पैनल से लॉगआउट करना चाहते हैं? आपका सारा डेटा क्लाउड पर सुरक्षित रहेगा।"
         });
       };
 
@@ -392,17 +505,26 @@
         const file = e.target.files?.[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = (ev) => {
+        reader.onload = async (ev) => {
           try {
             const parsed = JSON.parse(ev.target.result);
+            let importedMembers = [];
             if (Array.isArray(parsed)) {
-              setMembers(parsed);
-              showToast(`${parsed.length} मेंबर्स का डेटा रिस्टोर हो गया!`);
-            } else if (parsed && typeof parsed === 'object') {
-              if (Array.isArray(parsed.members)) setMembers(parsed.members);
+              importedMembers = parsed;
+            } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.members)) {
+              importedMembers = parsed.members;
               if (Array.isArray(parsed.deletedArchive)) setDeletedArchive(parsed.deletedArchive);
-              showToast("बैकअप सफलतापूर्वक रिस्टोर हो गया!");
             }
+            setMembers(importedMembers);
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(importedMembers));
+
+            if (window.FB && window.FB.db) {
+              const { db, appId, doc, setDoc } = window.FB;
+              for (let m of importedMembers) {
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'members_list', String(m.id)), m);
+              }
+            }
+            showToast(`${importedMembers.length} मेंबर्स का डेटा क्लाउड और लोकल में रिस्टोर हो गया!`);
           } catch (err) {
             showToast("अमान्य बैकअप फाइल!", "error");
           }
@@ -410,7 +532,7 @@
         reader.readAsText(file);
       };
 
-      // --- LOGIN SCREEN ---
+      {/* --- LOGIN SCREEN (Without Subtitle Text as requested) --- */}
       if (!isLoggedIn) {
         return (
           <div className="min-h-screen bg-[#050505] flex flex-col justify-between p-4 relative overflow-hidden">
@@ -428,7 +550,7 @@
                 </div>
                 <h2 className="text-2xl font-black text-white text-center tracking-wide">OWNER ADMIN LOGIN</h2>
                 <p className="text-zinc-400 text-center text-xs sm:text-sm mt-1 mb-6">
-                  {loginStep === 'phone' ? 'जिम का हिसाब-किताब खोलने के लिए ओनर मोबाइल नंबर डालें' : `मोबाइल ${phoneNumber} के लिए 6-अंकों का सुरक्षा पिन (OTP) डालें`}
+                  {loginStep === 'phone' ? '' : `मोबाइल ${phoneNumber} के लिए 6-अंकों का सुरक्षा पिन (OTP) डालें`}
                 </p>
 
                 <form onSubmit={handleLoginSubmit} className="space-y-4">
@@ -487,7 +609,7 @@
                 </form>
               </div>
             </div>
-            <div className="text-center text-zinc-600 text-xs z-10">🛡️ Strict Copy Protection • John Fitness Official Management</div>
+            <div className="text-center text-zinc-600 text-xs z-10">☁️ Cloud Synced & Protected • John Fitness Official Management</div>
           </div>
         );
       }
@@ -586,13 +708,19 @@
                 ))}
               </div>
 
-              <button 
-                onClick={() => setIsAddModalOpen(true)}
-                className="w-full sm:w-auto bg-gradient-to-r from-red-600 via-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-[0_4px_20px_rgba(220,38,38,0.4)] transition-all active:scale-95 flex items-center justify-center gap-1.5"
-              >
-                <span className="text-base leading-none">+</span>
-                <span>नया एडमिशन (Add Member)</span>
-              </button>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="hidden lg:flex items-center gap-1.5 bg-zinc-900 border border-zinc-800 px-3 py-2 rounded-xl text-xs font-semibold text-zinc-400">
+                  <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+                  <span>Cloud Synced</span>
+                </div>
+                <button 
+                  onClick={() => setIsAddModalOpen(true)}
+                  className="flex-1 sm:flex-initial bg-gradient-to-r from-red-600 via-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-black shadow-[0_4px_20px_rgba(220,38,38,0.4)] transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                >
+                  <span className="text-base leading-none">+</span>
+                  <span>नया एडमिशन (Add Member)</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -679,7 +807,7 @@
               </div>
             )}
 
-            {/* Search & Smart Filter Bar (Hidden in Archive tab which has its own search) */}
+            {/* Search & Smart Filter Bar */}
             {activeTab !== 'archive' && (
               <div className="bg-zinc-950 border border-zinc-800/90 p-3.5 rounded-2xl flex flex-col sm:flex-row gap-3 justify-between items-center shadow-md">
                 <div className="relative w-full sm:w-96">
@@ -742,7 +870,7 @@
                 <div className="bg-zinc-950 border border-zinc-800 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-3">
                   <div>
                     <h3 className="text-base font-black text-white">🗂️ परमानेंट डिलीटेड मेंबर्स हिस्ट्री (Permanent Archive)</h3>
-                    <p className="text-xs text-zinc-400">जिम से हटाए गए सभी मेंबर्स और उनके हटाने का कारण सुरक्षित रिकॉर्ड के रूप में यहां दर्ज है।</p>
+                    <p className="text-xs text-zinc-400">जिम से हटाए गए सभी मेंबर्स और उनके हटाने का कारण सुरक्षित क्लाउड रिकॉर्ड के रूप में यहां दर्ज है।</p>
                   </div>
                   <div className="w-full sm:w-72">
                     <input 
@@ -900,9 +1028,14 @@
                                 🧾 रसीद
                               </button>
                               <button
+                                onClick={() => setActiveIdCardMember(member)}
+                                className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
+                              >
+                                🪪 ID Card
+                              </button>
+                              <button
                                 onClick={() => setEditingMember(member)}
                                 className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 py-2 px-2.5 rounded-xl text-xs font-bold transition-colors"
-                                title="मेंबर की जानकारी एडिट करें"
                               >
                                 ✏️ एडिट
                               </button>
@@ -925,7 +1058,7 @@
                               <button
                                 onClick={() => setDeleteTargetMember(member)}
                                 className="bg-zinc-900 hover:bg-red-950 text-zinc-400 hover:text-red-400 py-2 px-2.5 rounded-xl text-xs"
-                                title="मेंबर हटाएं (कारण सहित)"
+                                title="मेंबर हटाएं"
                               >
                                 🗑️
                               </button>
@@ -946,7 +1079,7 @@
                               <th className="p-4 font-bold">तय फीस</th>
                               <th className="p-4 font-bold">जमा (Paid)</th>
                               <th className="p-4 font-bold">बाकी (Due)</th>
-                              <th className="p-4 font-bold text-right">एक्शन (Edit / किश्त / रसीद / WhatsApp)</th>
+                              <th className="p-4 font-bold text-right">एक्शन</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-zinc-800/60 text-sm">
@@ -1015,9 +1148,14 @@
                                         🧾 रसीद
                                       </button>
                                       <button
+                                        onClick={() => setActiveIdCardMember(member)}
+                                        className="bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                                      >
+                                        🪪 ID Card
+                                      </button>
+                                      <button
                                         onClick={() => setEditingMember(member)}
                                         className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-colors"
-                                        title="मेंबर की पूरी जानकारी एडिट करें"
                                       >
                                         ✏️ एडिट
                                       </button>
@@ -1057,8 +1195,9 @@
               mode="add"
               onClose={() => setIsAddModalOpen(false)}
               onSave={(newMember) => {
-                setMembers(prev => [newMember, ...prev]);
-                showToast(`${newMember.name} का एडमिशन सेव हो गया!`);
+                const updatedList = [newMember, ...members];
+                saveMemberToCloudAndLocal(updatedList, newMember);
+                showToast(`${newMember.name} का एडमिशन क्लाउड पर सेव हो गया!`);
                 setIsAddModalOpen(false);
               }}
               showToast={showToast}
@@ -1072,7 +1211,8 @@
               initialMember={editingMember}
               onClose={() => setEditingMember(null)}
               onSave={(updatedMember) => {
-                setMembers(prev => prev.map(m => m.id === updatedMember.id ? updatedMember : m));
+                const updatedList = members.map(m => m.id === updatedMember.id ? updatedMember : m);
+                saveMemberToCloudAndLocal(updatedList, updatedMember);
                 showToast(`${updatedMember.name} की जानकारी अपडेट हो गई!`);
                 setEditingMember(null);
               }}
@@ -1086,7 +1226,8 @@
               member={members.find(m => m.id === selectedMemberForPayment.id) || selectedMemberForPayment}
               onClose={() => setSelectedMemberForPayment(null)}
               onUpdateMember={(updated) => {
-                setMembers(prev => prev.map(m => m.id === updated.id ? updated : m));
+                const updatedList = members.map(m => m.id === updated.id ? updated : m);
+                saveMemberToCloudAndLocal(updatedList, updated);
                 setSelectedMemberForPayment(updated);
               }}
               onOpenReceipt={(m) => {
@@ -1109,7 +1250,15 @@
             />
           )}
 
-          {/* Delete Member with Reason Modal (नवीन डिलीट कारण चयन फीचर) */}
+          {/* Digital ID Card Modal */}
+          {activeIdCardMember && (
+            <IdCardModal 
+              member={members.find(m => m.id === activeIdCardMember.id) || activeIdCardMember}
+              onClose={() => setActiveIdCardMember(null)}
+            />
+          )}
+
+          {/* Delete Member with Reason Modal */}
           {deleteTargetMember && (
             <DeleteReasonModal 
               target={deleteTargetMember}
@@ -1125,9 +1274,7 @@
                   return;
                 }
 
-                const memberId = deleteTargetMember.id;
-                setMembers(prev => prev.filter(m => m.id !== memberId));
-                setDeletedArchive(prev => [archiveObj, ...prev]);
+                executeDeleteMember(archiveObj, deleteTargetMember.id);
                 showToast(`${deleteTargetMember.name} को हटाकर परमानेंट हिस्ट्री में सेव कर दिया गया।`);
                 setDeleteTargetMember(null);
               }}
@@ -1261,7 +1408,7 @@
               </div>
 
               <div className="bg-zinc-900/60 border border-zinc-800 p-3 rounded-xl text-[11px] text-zinc-400">
-                ℹ️ यह रिकॉर्ड परमानेंट डिलीटेड हिस्ट्री (Archive) में सुरक्षित हो जाएगा और इसे कभी मिटाया नहीं जा सकेगा।
+                ℹ️ यह रिकॉर्ड परमानेंट डिलीटेड हिस्ट्री (Archive) में क्लाउड पर सुरक्षित हो जाएगा।
               </div>
 
               <div className="flex justify-end gap-2.5 pt-2">
@@ -1746,81 +1893,4 @@
                   <p className="font-bold text-sm">{member.name}</p>
                 </div>
                 <div>
-                  <p className="text-zinc-500">Mobile Number:</p>
-                  <p className="font-bold text-sm">{member.phone}</p>
-                </div>
-                <div>
-                  <p className="text-zinc-500">Plan & Join Date:</p>
-                  <p className="font-bold">{member.planDuration}M ({new Date(member.joinDate).toLocaleDateString('en-IN')})</p>
-                </div>
-                <div>
-                  <p className="text-zinc-500">Valid Till:</p>
-                  <p className="font-bold">{expiryDate.toLocaleDateString('en-IN')}</p>
-                </div>
-              </div>
-
-              <div className="space-y-1.5 text-xs">
-                <p className="font-bold text-zinc-700 uppercase">किश्त विवरण (Installments Paid):</p>
-                {fin.payments.length === 0 ? (
-                  <p className="text-zinc-400">कोई फीस जमा नहीं</p>
-                ) : (
-                  fin.payments.map((p, idx) => (
-                    <div key={idx} className="flex justify-between border-b border-zinc-200 py-1">
-                      <span>#{idx + 1} • {new Date(p.date).toLocaleDateString('en-IN')} ({p.mode})</span>
-                      <strong className="text-green-700">₹{Number(p.amount).toLocaleString()}</strong>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <div className="bg-zinc-900 text-white p-3.5 rounded-xl space-y-1 text-xs">
-                <div className="flex justify-between">
-                  <span>कुल तय फीस (Agreed Fee):</span>
-                  <strong>₹{fin.totalAgreed.toLocaleString()}</strong>
-                </div>
-                <div className="flex justify-between text-green-400">
-                  <span>कुल जमा राशि (Total Paid):</span>
-                  <strong>₹{fin.paidAmount.toLocaleString()}</strong>
-                </div>
-                <div className="flex justify-between text-orange-400 border-t border-zinc-700 pt-1.5 text-sm font-black">
-                  <span>बकाया राशि (Balance Due):</span>
-                  <span>₹{fin.pendingAmount.toLocaleString()}</span>
-                </div>
-              </div>
-
-              <p className="text-center text-[11px] font-bold text-zinc-500 pt-1">
-                🙏 धन्यवाद! स्वस्थ रहें, फिट रहें • JOHN FITNESS
-              </p>
-            </div>
-
-            <div className="flex flex-col sm:flex-row gap-2">
-              <button
-                onClick={() => sendWhatsAppReceipt(member)}
-                className="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded-xl text-xs shadow-lg"
-              >
-                📲 WhatsApp पर रसीद भेजें
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 px-4 rounded-xl text-xs"
-              >
-                🖨️ प्रिंट / PDF
-              </button>
-              <button
-                onClick={onClose}
-                className="bg-zinc-900 text-zinc-400 hover:text-white font-bold py-3 px-4 rounded-xl text-xs"
-              >
-                बंद करें
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-  </script>
-</body>
-</html>
-```
+   
